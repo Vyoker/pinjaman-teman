@@ -23,6 +23,17 @@ Total tagihan = Pokok + (Pokok x 0,2% x tenor hari) + Rp 2.000 (biaya layanan)
   Bronze 10x, Silver 20x, Gold 30x, Platinum 40x, Diamond 50x.
   Statistik per peminjam (pembayaran berhasil, pinjaman lunas, total pinjam)
   tampil di dashboard.
+- **Data diri & bonus limit (v1.2)**: menu Akun berisi 10 data
+  (nama lengkap, usia, jenis kelamin, tanggal lahir, no. KK, no. NIK, alamat,
+  pekerjaan, foto KTP, foto KK). Tiap data yang **disetujui admin**
+  menambah limit: Rp 2.500 (6 data), Rp 5.000 (KK/NIK), Rp 10.000 (foto KTP/KK)
+  — maks Rp 45.000. Verifikasi manual satu per satu di menu Verifikasi admin.
+- **Kelola pinjaman (v1.3)**: admin bisa membatalkan pinjaman yang sudah
+  berjalan (menu Pengajuan) selama belum ada pembayaran sama sekali;
+  statistik total pinjam peminjam ikut dikoreksi.
+- **Hapus akun (v1.3)**: admin bisa menghapus akun peminjam permanen
+  (menu Peminjam); sesi login akun tersebut langsung hangus. Tidak bisa
+  dihapus jika masih ada pinjaman aktif — batalkan dulu.
 
 ## Arsitektur
 

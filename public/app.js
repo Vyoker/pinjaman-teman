@@ -461,9 +461,9 @@ async function vADash() {
 }
 
 async function vPengajuan() {
-  const { loans } = await api('/api/loans?status=diajukan');
-  if (!loans.length) { main.innerHTML = `<div${stagger(0, 'card')}><p class="muted mb-0"><i class="bi bi-inbox me-2"></i>Tidak ada pengajuan menunggu.</p></div>`; return; }
-  main.innerHTML = '<div class="section-title">Pengajuan pinjaman</div>' + loans.map((l, i) => `
+  const { loans: pending } = await api('/api/loans?status=diajukan');
+  const { loans: running } = await api('/api/loans?status=berjalan');
+  const secPengajuan = '<div class="section-title">Pengajuan pinjaman</div>' + (pending.map((l, i) => `
     <div${stagger(i, 'card')}>
       <div class="d-flex justify-content-between align-items-center mb-2"><strong>${esc(l.borrowerName)}</strong>${badge(l.status)}</div>
       <div class="kv"><span class="k">Pokok</span><span class="v">${fmtRp(l.pokok)}</span></div>
@@ -476,7 +476,22 @@ async function vPengajuan() {
         <button class="btn btn-primary btn-sm flex-fill" data-ok="${l.id}"><i class="bi bi-check-lg me-1"></i>Setujui</button>
         <button class="btn btn-danger btn-sm flex-fill" data-no="${l.id}"><i class="bi bi-x-lg me-1"></i>Tolak</button>
       </div>
-    </div>`).join('');
+    </div>`).join('') || `<div class="card anim-in"><p class="muted mb-0"><i class="bi bi-inbox me-2"></i>Tidak ada pengajuan menunggu.</p></div>`);
+  const secBerjalan = '<div class="section-title">Pinjaman berjalan</div>' + (running.map((l, i) => {
+    const paid = l.schedule.filter((s) => s.status === 'lunas').length;
+    const canCancel = l.schedule.every((s) => s.status === 'belum');
+    return `
+    <div${stagger(i, 'card')}>
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <div><strong>${esc(l.borrowerName)}</strong><div class="muted">${l.id} &middot; ${fmtRp(l.total)} &middot; ${paid}/${l.schedule.length} terbayar</div></div>
+        ${badge(l.status)}
+      </div>
+      ${canCancel
+        ? `<button class="btn btn-outline-danger btn-sm w-100" data-cancel="${l.id}"><i class="bi bi-x-circle me-1"></i>Batalkan Pinjaman</button>`
+        : `<p class="muted mb-0" style="font-size:12px"><i class="bi bi-lock-fill me-1"></i>Tidak bisa dibatalkan: sudah ada pembayaran.</p>`}
+    </div>`;
+  }).join('') || `<div class="card anim-in"><p class="muted mb-0"><i class="bi bi-inbox me-2"></i>Tidak ada pinjaman berjalan.</p></div>`);
+  main.innerHTML = secPengajuan + secBerjalan;
   main.querySelectorAll('[data-ok]').forEach((b) => b.addEventListener('click', async () => {
     try {
       await api('/api/loan-decide', 'POST', {
@@ -490,6 +505,14 @@ async function vPengajuan() {
     try {
       await api('/api/loan-decide', 'POST', { loanId: b.dataset.no, approve: false });
       toast('Pengajuan ditolak.');
+      go('pengajuan');
+    } catch (e) { toast(e.message, true); }
+  }));
+  main.querySelectorAll('[data-cancel]').forEach((b) => b.addEventListener('click', async () => {
+    if (!confirm('Batalkan pinjaman ini? Status menjadi dibatalkan dan tidak bisa dikembalikan.')) return;
+    try {
+      await api('/api/loan-cancel', 'POST', { loanId: b.dataset.cancel });
+      toast('Pinjaman dibatalkan.');
       go('pengajuan');
     } catch (e) { toast(e.message, true); }
   }));
@@ -542,6 +565,7 @@ async function vPeminjam() {
           <button class="btn btn-primary btn-sm flex-fill" data-ok="${b.phone}"><i class="bi bi-check-lg me-1"></i>Setujui</button>
           <button class="btn btn-danger btn-sm flex-fill" data-no="${b.phone}"><i class="bi bi-x-lg me-1"></i>Tolak</button>
         </div>
+        <button class="btn btn-outline-danger btn-sm w-100 mt-2" data-del="${b.phone}"><i class="bi bi-trash-fill me-1"></i>Hapus Akun</button>
       </div>`).join('') || `<div class="card anim-in"><p class="muted mb-0">Tidak ada.</p></div>`}
     <div class="section-title">Peminjam aktif (${act.length})</div>
     ${act.map((b, i) => `
@@ -552,7 +576,16 @@ async function vPeminjam() {
         <label class="form-label">Limit (Rp)</label>
         <div class="d-flex gap-2"><input type="number" id="l-${b.phone}" class="form-control" value="${b.limit}">
         <button class="btn btn-outline-light btn-sm" data-lim="${b.phone}">Simpan</button></div>
+        <button class="btn btn-outline-danger btn-sm w-100 mt-2" data-del="${b.phone}"><i class="bi bi-trash-fill me-1"></i>Hapus Akun</button>
       </div>`).join('') || `<div class="card anim-in"><p class="muted mb-0">Belum ada.</p></div>`}`;
+  main.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
+    if (!confirm(`Hapus akun ${b.dataset.del} permanen? Data akun hilang, riwayat pinjaman tetap tersimpan.`)) return;
+    try {
+      await api('/api/user-delete', 'POST', { phone: b.dataset.del });
+      toast('Akun dihapus.');
+      go('peminjam');
+    } catch (e) { toast(e.message, true); }
+  }));
   main.querySelectorAll('[data-ok]').forEach((b) => b.addEventListener('click', async () => {
     try {
       await api('/api/borrowers', 'POST', { phone: b.dataset.ok, approve: true, limit: Number($('#l-' + b.dataset.ok).value) });

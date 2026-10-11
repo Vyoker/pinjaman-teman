@@ -254,6 +254,45 @@ function ok(cond, label) {
   r = await call('../api/loans', { method: 'POST', headers: authS, body: { pokok: 102000, tenorHari: 15, metode: 'lunas' } });
   ok(r.json.ok, 'pengajuan 102rb lolos berkat bonus limit');
 
+  console.log('== Tes e2e cancel & hapus akun ==');
+  r = await call('../api/loans', { method: 'GET', headers: authS });
+  const loanS = r.json.loans.find((l) => l.status === 'diajukan').id;
+  r = await call('../api/loan-decide', { method: 'POST', headers: auth(tA), body: { loanId: loanS, approve: true, tenorHari: 15 } });
+  assert.ok(r.json.ok, 'pinjaman Siti disetujui');
+  r = await call('../api/loan-cancel', { method: 'POST', headers: authS, body: { loanId: loanS } });
+  ok(r.status === 403, 'peminjam ditolak cancel');
+  r = await call('../api/loan-cancel', { method: 'POST', headers: auth(tA), body: { loanId: 'L999' } });
+  ok(r.status === 404, 'cancel pinjaman tidak ada -> 404');
+  r = await call('../api/loan-cancel', { method: 'POST', headers: auth(tA), body: { loanId: loanS } });
+  ok(r.json.ok && r.json.loan.status === 'dibatalkan', 'pinjaman dibatalkan');
+  r = await call('../api/me', { method: 'GET', headers: authS });
+  ok(r.json.stats.totalPinjam === 0, 'totalPinjam dikoreksi ke 0');
+  r = await call('../api/loan-cancel', { method: 'POST', headers: auth(tA), body: { loanId: loanS } });
+  ok(r.status === 400, 'cancel pinjaman dibatalkan ditolak');
+  // cancel terhalang pembayaran: Budi cicilan 2x, bayar 1x
+  r = await call('../api/loans', { method: 'POST', headers: auth(tB), body: { pokok: 200000, tenorHari: 15, metode: 'cicilan' } });
+  assert.ok(r.json.ok, 'pengajuan cicilan Budi');
+  const loanB = r.json.loan.id;
+  r = await call('../api/loan-decide', { method: 'POST', headers: auth(tA), body: { loanId: loanB, approve: true, tenorHari: 15 } });
+  assert.ok(r.json.ok, 'pinjaman Budi disetujui');
+  r = await call('../api/payments', { method: 'POST', headers: auth(tB), body: { action: 'claim', loanId: loanB, schedIdx: 0, payMethod: 'dana' } });
+  const cB = r.json.claim.id;
+  r = await call('../api/payments', { method: 'POST', headers: auth(tA), body: { action: 'confirm', claimId: cB, approve: true } });
+  assert.ok(r.json.ok, 'cicilan-1 Budi diterima');
+  r = await call('../api/loan-cancel', { method: 'POST', headers: auth(tA), body: { loanId: loanB } });
+  ok(r.status === 400, 'cancel pinjaman yang sudah dibayar sebagian ditolak');
+  // hapus akun
+  r = await call('../api/user-delete', { method: 'POST', headers: auth(tA), body: { phone: '08123456789' } });
+  ok(r.status === 400, 'hapus akun dengan pinjaman aktif ditolak');
+  r = await call('../api/user-delete', { method: 'POST', headers: authS, body: { phone: '08123456789' } });
+  ok(r.status === 403, 'peminjam ditolak hapus akun');
+  r = await call('../api/user-delete', { method: 'POST', headers: auth(tA), body: { phone: '081900000002' } });
+  ok(r.json.ok && r.json.phone === '081900000002', 'akun Siti dihapus');
+  r = await call('../api/me', { method: 'GET', headers: authS });
+  ok(r.status === 401, 'sesi akun terhapus -> 401');
+  r = await call('../api/user-delete', { method: 'POST', headers: auth(tA), body: { phone: '081900000002' } });
+  ok(r.status === 404, 'hapus akun tidak ada -> 404');
+
   console.log(`\nSEMUA TES LOLOS (${n} asersi)`);
 })().catch((e) => {
   console.error('\nTES GAGAL:', e.message);
