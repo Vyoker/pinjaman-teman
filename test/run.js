@@ -92,6 +92,29 @@ function ok(cond, label) {
   ok(calc.rankFor(25).current.name === 'Silver' && calc.rankFor(25).next.name === 'Gold', 'rank 25 = Silver, next Gold');
   ok(calc.rankFor(55).current.name === 'Diamond' && calc.rankFor(55).next === null, 'rank 55 = Diamond (max)');
 
+  console.log('== Tes profil & bonus limit ==');
+  const prof = require('../lib/profile');
+  ok(prof.validateField('noNIK', '1234567890123456').ok, 'NIK 16 digit valid');
+  ok(!prof.validateField('noNIK', '123').ok, 'NIK pendek ditolak');
+  ok(!prof.validateField('noKK', 'abcdefghijklmnop').ok, 'KK non-digit ditolak');
+  ok(!prof.validateField('usia', '16').ok, 'usia <17 ditolak');
+  ok(prof.validateField('usia', '25').value === 25, 'usia 25 valid');
+  ok(!prof.validateField('jenisKelamin', 'X').ok, 'gender invalid ditolak');
+  ok(prof.validateField('jenisKelamin', 'Perempuan').ok, 'gender valid');
+  ok(!prof.validateField('tanggalLahir', '2030-01-01').ok, 'tgl lahir masa depan ditolak');
+  ok(prof.validateField('tanggalLahir', '1995-05-20').ok, 'tgl lahir valid');
+  ok(!prof.validateField('ngawur', 'x').ok, 'field unknown ditolak');
+  ok(!prof.validateField('fotoKTP', 'bukan-data-url').ok, 'foto invalid ditolak');
+  ok(prof.validateField('fotoKTP', 'data:image/jpeg;base64,AAAA').ok, 'foto dataURL valid');
+  const p0 = prof.emptyProfile();
+  p0.namaLengkap.status = 'disetujui';
+  p0.fotoKTP.status = 'disetujui';
+  p0.noNIK.status = 'menunggu';
+  ok(prof.limitBonus(p0) === 12500, 'bonus 2500+10000 = 12.500');
+  ok(prof.maxBonus() === 45000, 'maks bonus 45.000');
+  ok(prof.effectiveLimit({ limit: 100000, profile: p0 }) === 112500, 'limit efektif 112.500');
+  ok(prof.countPending(p0) === 1, 'satu field menunggu');
+
   console.log('== Tes alur API ==');
   // 1. registrasi
   let r = await call('../api/auth-register', { method: 'POST', body: { name: 'Budi', phone: '08123456789', password: 'budi123' } });
@@ -189,6 +212,47 @@ function ok(cond, label) {
     'statistik terakumulasi: 5 bayar, 2 lunas, 800rb');
   r = await call('../api/admin-stats', { method: 'GET', headers: auth(tA) });
   ok(r.json.ok && r.json.outstanding === 0, 'outstanding kembali 0');
+
+  console.log('== Tes e2e profil & limit ==');
+  r = await call('../api/auth-register', { method: 'POST', body: { name: 'Siti', phone: '081900000002', password: 'siti1234' } });
+  assert.ok(r.json.ok, 'registrasi Siti');
+  const tS = (await call('../api/auth-login', { method: 'POST', body: { phone: '081900000002', password: 'siti1234' } })).json.token;
+  assert.ok(!tS, 'Siti belum bisa login sebelum disetujui');
+  r = await call('../api/borrowers', { method: 'POST', headers: auth(tA), body: { phone: '081900000002', approve: true, limit: 100000 } });
+  assert.ok(r.json.ok, 'Siti disetujui limit 100rb');
+  const tS2 = (await call('../api/auth-login', { method: 'POST', body: { phone: '081900000002', password: 'siti1234' } })).json.token;
+  const authS = auth(tS2);
+  // kirim namaLengkap -> menunggu, bonus belum aktif
+  r = await call('../api/profile', { method: 'POST', headers: authS, body: { field: 'namaLengkap', value: 'Siti Aminah' } });
+  ok(r.json.ok && r.json.profile.namaLengkap.status === 'menunggu', 'namaLengkap menunggu verifikasi');
+  ok(r.json.bonus === 0 && r.json.effectiveLimit === 100000, 'bonus 0 sebelum disetujui');
+  // NIK invalid ditolak
+  r = await call('../api/profile', { method: 'POST', headers: authS, body: { field: 'noNIK', value: '123' } });
+  ok(r.status === 400, 'NIK 15 digit ditolak');
+  // admin setujui -> limit naik 2.500
+  r = await call('../api/profile-verify', { method: 'POST', headers: auth(tA), body: { phone: '081900000002', field: 'namaLengkap', approve: true } });
+  ok(r.json.ok && r.json.status === 'disetujui' && r.json.effectiveLimit === 102500, 'approve -> limit efektif 102.500');
+  r = await call('../api/profile-verify', { method: 'POST', headers: auth(tA), body: { phone: '081900000002', field: 'namaLengkap', approve: true } });
+  ok(r.status === 400, 'verifikasi ganda ditolak');
+  // peminjam tidak boleh verifikasi
+  r = await call('../api/profile-verify', { method: 'POST', headers: authS, body: { phone: '081900000002', field: 'usia', approve: true } });
+  ok(r.status === 403, 'peminjam ditolak akses verifikasi');
+  // foto KTP -> admin tolak
+  const fakePhoto = 'data:image/jpeg;base64,' + 'A'.repeat(1000);
+  r = await call('../api/profile', { method: 'POST', headers: authS, body: { field: 'fotoKTP', value: fakePhoto } });
+  ok(r.json.ok && r.json.profile.fotoKTP.status === 'menunggu', 'foto KTP menunggu');
+  r = await call('../api/admin-stats', { method: 'GET', headers: auth(tA) });
+  ok(r.json.pendingVerifikasi === 1, 'satu data menunggu verifikasi');
+  r = await call('../api/profile-verify', { method: 'POST', headers: auth(tA), body: { phone: '081900000002', field: 'fotoKTP', approve: false } });
+  ok(r.json.ok && r.json.status === 'ditolak' && r.json.effectiveLimit === 102500, 'tolak -> limit tetap 102.500');
+  // me tampilkan bonus & efektif
+  r = await call('../api/me', { method: 'GET', headers: authS });
+  ok(r.json.bonusLimit === 2500 && r.json.effectiveLimit === 102500, 'me: bonus 2.500, efektif 102.500');
+  // pengajuan di atas efektif ditolak, di bawah efektif lolos
+  r = await call('../api/loans', { method: 'POST', headers: authS, body: { pokok: 103000, tenorHari: 15, metode: 'lunas' } });
+  ok(!r.json.ok && /limit/i.test(r.json.error), 'pengajuan 103rb ditolak (di atas 102.500)');
+  r = await call('../api/loans', { method: 'POST', headers: authS, body: { pokok: 102000, tenorHari: 15, metode: 'lunas' } });
+  ok(r.json.ok, 'pengajuan 102rb lolos berkat bonus limit');
 
   console.log(`\nSEMUA TES LOLOS (${n} asersi)`);
 })().catch((e) => {

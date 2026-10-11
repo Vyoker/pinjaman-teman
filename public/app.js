@@ -1,6 +1,7 @@
 'use strict';
 /* Pinjaman Teman — SPA frontend (Bootstrap 5 + animasi) */
 
+const APP_VERSION = '1.2.0';
 const $ = (s) => document.querySelector(s);
 const main = $('#main'), nav = $('#nav'), topbar = $('#topbar');
 
@@ -91,12 +92,14 @@ const NAVS = {
     ['ajukan', 'Ajukan', 'bi-plus-circle-fill'],
     ['bayar', 'Bayar', 'bi-wallet2'],
     ['riwayat', 'Riwayat', 'bi-clock-history'],
+    ['akun', 'Akun', 'bi-person-fill'],
   ],
   admin: [
     ['aDash', 'Dashboard', 'bi-speedometer2'],
     ['pengajuan', 'Pengajuan', 'bi-inbox-fill'],
     ['klaim', 'Pembayaran', 'bi-arrow-left-right'],
     ['peminjam', 'Peminjam', 'bi-people-fill'],
+    ['verifikasi', 'Verifikasi', 'bi-patch-check-fill'],
     ['pengaturan', 'Pengaturan', 'bi-gear-fill'],
   ],
 };
@@ -105,6 +108,7 @@ function renderChrome() {
   const logged = !!S.token;
   topbar.classList.toggle('hidden', !logged);
   nav.classList.toggle('hidden', !logged);
+  $('#footer').classList.toggle('hidden', !logged);
   if (!logged) return;
   $('#userName').textContent = S.name + (S.role === 'admin' ? ' (Admin)' : '');
   nav.innerHTML = NAVS[S.role].map(([v, l, ic]) =>
@@ -243,7 +247,10 @@ async function vBDash() {
       <div class="d-flex justify-content-between align-items-center mb-1">
         <h3 class="mb-0">Halo, ${esc(me.name)}</h3>${badge(me.status)}
       </div>
-      <div class="kv"><span class="k">Limit pinjaman kamu</span><span class="v big" data-count="${me.limit}" data-count-kind="rp">…</span></div>
+      <div class="kv"><span class="k">Limit pinjaman kamu</span><span class="v big" data-count="${me.effectiveLimit ?? me.limit}" data-count-kind="rp">…</span></div>
+      ${(me.bonusLimit || 0) > 0
+        ? `<div class="muted" style="font-size:12px">termasuk bonus data diri ${fmtRp(me.bonusLimit)}</div>`
+        : `<div class="muted" style="font-size:12px">Mau limit lebih besar? <a href="#" id="b-lengkapi" style="color:var(--gold)">Lengkapi data diri</a></div>`}
       ${active ? '' : '<button class="btn btn-primary w-100 mt-3" id="b-ajukan"><i class="bi bi-plus-circle-fill me-2"></i>Ajukan Pinjaman</button>'}
     </div>
     ${rankCard}
@@ -253,6 +260,8 @@ async function vBDash() {
     ${hist.map((l, i) => loanCard(l, false, i + 3)).join('') || `<div class="card anim-in"><p class="muted mb-0">Belum ada riwayat.</p></div>`}`;
   const b = $('#b-ajukan');
   if (b) b.addEventListener('click', () => go('ajukan'));
+  const bl = $('#b-lengkapi');
+  if (bl) bl.addEventListener('click', (e) => { e.preventDefault(); go('akun'); });
 }
 
 let simTimer = null;
@@ -261,7 +270,7 @@ async function vAjukan() {
   main.innerHTML = `
     <div${stagger(0, 'card')}>
       <h3><i class="bi bi-plus-circle-fill me-2" style="color:var(--gold)"></i>Ajukan Pinjaman</h3>
-      <div class="kv"><span class="k">Limit kamu</span><span class="v">${fmtRp(me.limit)}</span></div>
+      <div class="kv"><span class="k">Limit kamu</span><span class="v">${fmtRp(me.effectiveLimit ?? me.limit)}${(me.bonusLimit || 0) > 0 ? ` <span class="muted" style="font-size:12px">(termasuk bonus ${fmtRp(me.bonusLimit)})</span>` : ''}</span></div>
       <label class="form-label">Jumlah pokok (Rp)</label>
       <input id="a-pokok" class="form-control" type="number" min="1000" step="1000" placeholder="500000">
       <label class="form-label">Tenor: <strong id="a-tenor-lbl" style="color:var(--gold)">30</strong> hari</label>
@@ -436,6 +445,7 @@ async function vADash() {
     ['Pengajuan menunggu', st.pendingLoans, 'num', false],
     ['Bayar menunggu', st.pendingClaims, 'num', false],
     ['Pendaftar menunggu', st.pendingBorrowers, 'num', false],
+    ['Verifikasi data', st.pendingVerifikasi || 0, 'num', (st.pendingVerifikasi || 0) > 0],
     ['Telat bayar', st.late.length, 'num', st.late.length > 0],
   ];
   main.innerHTML = `
@@ -588,13 +598,162 @@ async function vPengaturan() {
   });
 }
 
+/** Kompres foto dari HP sebelum dikirim (maks 1024px, JPEG). */
+function compressImage(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      try {
+        const maxDim = 1024;
+        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+        const c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(img.width * scale));
+        c.height = Math.max(1, Math.round(img.height * scale));
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url);
+        resolve(c.toDataURL('image/jpeg', 0.72));
+      } catch (e) { reject(e); }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Foto tidak terbaca.')); };
+    img.src = url;
+  });
+}
+
+const PF_STATUS = {
+  belum: '<span class="badge b-belum">Belum diisi</span>',
+  menunggu: '<span class="badge b-menunggu">Menunggu verifikasi</span>',
+  disetujui: '<span class="badge b-diterima">Disetujui</span>',
+  ditolak: '<span class="badge b-ditolak">Ditolak — kirim ulang</span>',
+};
+
+async function vAkun() {
+  const d = await api('/api/profile');
+  const pct = d.maxBonus ? Math.round((d.bonus / d.maxBonus) * 100) : 0;
+  const inputFor = (f, cur) => {
+    const id = 'pf-' + f.key;
+    const v = cur.value;
+    if (f.type === 'select') {
+      return `<select id="${id}" class="form-select">${f.options.map((o) => `<option ${v === o ? 'selected' : ''}>${o}</option>`).join('')}</select>`;
+    }
+    if (f.type === 'date') return `<input id="${id}" type="date" class="form-control" value="${esc(v)}">`;
+    if (f.type === 'number') return `<input id="${id}" type="number" class="form-control" value="${esc(v)}" min="17" max="100">`;
+    if (f.type === 'textarea') return `<textarea id="${id}" class="form-control" rows="2">${esc(v)}</textarea>`;
+    if (f.type === 'photo') {
+      return `${v ? `<a href="${v}" target="_blank" rel="noopener"><img src="${v}" class="photo-thumb mb-2" alt="${esc(f.label)}"></a>` : ''}
+        <input id="${id}" type="file" class="form-control" accept="image/*" capture="environment">`;
+    }
+    return `<input id="${id}" type="text" class="form-control" value="${esc(v)}">`;
+  };
+  main.innerHTML = `
+    <div${stagger(0, 'card')}>
+      <h3><i class="bi bi-person-fill me-2" style="color:var(--gold)"></i>Akun Saya</h3>
+      <div class="kv"><span class="k">Nama</span><span class="v">${esc(d.name)}</span></div>
+      <div class="kv"><span class="k">No. HP</span><span class="v">${esc(d.phone)}</span></div>
+      <div class="kv"><span class="k">Limit dasar</span><span class="v">${fmtRp(d.limit)}</span></div>
+      <div class="kv"><span class="k">Bonus data</span><span class="v" style="color:var(--gold)">+${fmtRp(d.bonus)}</span></div>
+      <div class="kv"><span class="k">Limit efektif</span><span class="v big">${fmtRp(d.effectiveLimit)}</span></div>
+      <div class="progress mt-2" style="height:10px;background:#0e1712"><div class="progress-bar" style="width:${pct}%;background:linear-gradient(90deg,var(--emerald),var(--gold))"></div></div>
+      <p class="muted mt-1 mb-0" style="font-size:12px">Bonus ${fmtRp(d.bonus)} dari maks ${fmtRp(d.maxBonus)}. Setiap data diverifikasi manual oleh admin sebelum bonus aktif.</p>
+    </div>
+    <div class="section-title">Data Diri</div>
+    ${d.fields.map((f, i) => {
+      const cur = d.profile[f.key] || { value: '', status: 'belum' };
+      return `
+      <div${stagger(i + 1, 'card')}>
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <strong>${esc(f.label)} <span class="muted" style="font-size:12px">+${fmtRp(f.bonus)}</span></strong>
+          ${PF_STATUS[cur.status] || PF_STATUS.belum}
+        </div>
+        ${inputFor(f, cur)}
+        <button class="btn btn-primary btn-sm mt-2" data-pfsend="${f.key}">
+          <i class="bi bi-send-fill me-1"></i>${cur.status === 'belum' ? 'Kirim' : 'Kirim Ulang'}
+        </button>
+      </div>`;
+    }).join('')}`;
+
+  main.querySelectorAll('[data-pfsend]').forEach((btn) => btn.addEventListener('click', async () => {
+    const key = btn.dataset.pfsend;
+    const f = d.fields.find((x) => x.key === key);
+    let value;
+    if (f.type === 'photo') {
+      const file = $('#pf-' + key).files[0];
+      if (!file) return toast('Pilih foto dulu.', true);
+      btn.disabled = true;
+      const old = btn.innerHTML; btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Memproses…';
+      try { value = await compressImage(file); }
+      catch (e) { btn.disabled = false; btn.innerHTML = old; return toast(e.message, true); }
+      btn.innerHTML = old;
+    } else {
+      value = $('#pf-' + key).value;
+    }
+    btn.disabled = true;
+    try {
+      await api('/api/profile', 'POST', { field: key, value });
+      toast('Data terkirim. Menunggu verifikasi admin.');
+      go('akun');
+    } catch (e) { toast(e.message, true); btn.disabled = false; }
+  }));
+}
+
+async function vVerifikasi() {
+  const { borrowers } = await api('/api/borrowers');
+  const pending = [];
+  for (const b of borrowers) {
+    if (b.status !== 'active') continue;
+    const d = await api('/api/profile?phone=' + encodeURIComponent(b.phone)).catch(() => null);
+    if (!d) continue;
+    const fields = d.fields.filter((f) => (d.profile[f.key] || {}).status === 'menunggu');
+    if (fields.length) pending.push({ b, d, fields });
+  }
+  if (!pending.length) {
+    main.innerHTML = `<div${stagger(0, 'card')}><p class="muted mb-0"><i class="bi bi-patch-check-fill me-2"></i>Tidak ada data menunggu verifikasi.</p></div>`;
+    return;
+  }
+  main.innerHTML = '<div class="section-title">Verifikasi data (' + pending.reduce((a, p) => a + p.fields.length, 0) + ')</div>' +
+    pending.map(({ b, d, fields }, pi) => `
+    <div${stagger(pi, 'card')}>
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <div><strong>${esc(b.name)}</strong><div class="muted">${esc(b.phone)}</div></div>
+        <span class="badge b-menunggu">${fields.length} menunggu</span>
+      </div>
+      ${fields.map((f) => {
+        const cur = d.profile[f.key];
+        const valHtml = f.type === 'photo'
+          ? `<a href="${cur.value}" target="_blank" rel="noopener"><img src="${cur.value}" class="photo-thumb" alt="${esc(f.label)}"></a>`
+          : `<div class="verify-val">${esc(String(cur.value))}</div>`;
+        return `<div class="verify-row">
+          <div class="flex-fill">${valHtml}<div class="muted" style="font-size:12px">${esc(f.label)} &middot; bonus ${fmtRp(f.bonus)}</div></div>
+          <div class="d-flex gap-2 align-items-start">
+            <button class="btn btn-primary btn-sm" data-vok="${esc(b.phone)}|${f.key}" title="Setujui"><i class="bi bi-check-lg"></i></button>
+            <button class="btn btn-danger btn-sm" data-vno="${esc(b.phone)}|${f.key}" title="Tolak"><i class="bi bi-x-lg"></i></button>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`).join('');
+
+  main.querySelectorAll('[data-vok],[data-vno]').forEach((btn) => btn.addEventListener('click', async () => {
+    const [phone, field] = (btn.dataset.vok || btn.dataset.vno).split('|');
+    const approve = !!btn.dataset.vok;
+    if (!approve && !confirm('Tolak data ini? Peminjam bisa kirim ulang.')) return;
+    btn.disabled = true;
+    try {
+      await api('/api/profile-verify', 'POST', { phone, field, approve });
+      toast(approve ? 'Data disetujui. Bonus limit aktif.' : 'Data ditolak.');
+      go('verifikasi');
+    } catch (e) { toast(e.message, true); btn.disabled = false; }
+  }));
+}
+
 const VIEWS = {
   login: vLogin, register: vRegister,
-  bDash: vBDash, ajukan: vAjukan, bayar: vBayar, riwayat: vRiwayat,
-  aDash: vADash, pengajuan: vPengajuan, klaim: vKlaim, peminjam: vPeminjam, pengaturan: vPengaturan,
+  bDash: vBDash, ajukan: vAjukan, bayar: vBayar, riwayat: vRiwayat, akun: vAkun,
+  aDash: vADash, pengajuan: vPengajuan, klaim: vKlaim, peminjam: vPeminjam, verifikasi: vVerifikasi, pengaturan: vPengaturan,
 };
 
 $('#btnLogout').addEventListener('click', logout);
+$('#footVer').textContent = 'Pinjaman Teman v' + APP_VERSION;
+$('#footYear').textContent = new Date().getFullYear();
 
 (async function init() {
   if (!S.token) return go('login');

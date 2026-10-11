@@ -5,6 +5,7 @@
 const { getJSON, setJSON, nextId } = require('../lib/store');
 const { requireAuth, readBody, send } = require('../lib/auth');
 const { MIN_TENOR, MAX_TENOR, calcLateFee, todayStr } = require('../lib/calc');
+const { effectiveLimit } = require('../lib/profile');
 
 async function idxPush(key, val) {
   const arr = (await getJSON(key)) || [];
@@ -65,7 +66,7 @@ module.exports = requireAuth(async (req, res) => {
       }
       const user = await getJSON('user:' + sess.phone);
       if (!user || user.status !== 'active') return send(res, 403, { ok: false, error: 'Akun tidak aktif.' });
-      if (pk > user.limit) return send(res, 400, { ok: false, error: 'Pokok melebihi limit kamu.' });
+      if (pk > effectiveLimit(user)) return send(res, 400, { ok: false, error: 'Pokok melebihi limit kamu.' });
       if (await hasActiveLoan(sess.phone)) {
         return send(res, 400, { ok: false, error: 'Masih ada pinjaman aktif. Selesaikan dulu.' });
       }

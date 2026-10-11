@@ -3,6 +3,7 @@
 const { getJSON } = require('../lib/store');
 const { requireAuth, readBody, send } = require('../lib/auth');
 const { calcLoan, amountWithMethod } = require('../lib/calc');
+const { effectiveLimit, limitBonus } = require('../lib/profile');
 
 module.exports = requireAuth(async (req, res) => {
   if (req.method !== 'POST') return send(res, 405, { ok: false, error: 'Method tidak didukung.' });
@@ -21,8 +22,11 @@ module.exports = requireAuth(async (req, res) => {
 
     if (req.session.role === 'borrower') {
       const user = await getJSON('user:' + req.session.phone);
-      out.limit = user ? user.limit : 0;
-      out.lebihDariLimit = sim.pokok > (user ? user.limit : 0);
+      const eff = user ? effectiveLimit(user) : 0;
+      out.limit = eff;
+      out.limitDasar = user ? user.limit : 0;
+      out.bonusLimit = user ? limitBonus(user.profile) : 0;
+      out.lebihDariLimit = sim.pokok > eff;
     }
     return send(res, 200, out);
   } catch (e) {

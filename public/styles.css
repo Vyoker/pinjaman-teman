@@ -302,3 +302,24 @@ input[type="range"].form-range::-webkit-slider-runnable-track {
 
 details.sim { margin-top: 12px; }
 details.sim summary { cursor: pointer; font-weight: 700; font-size: 14px; color: var(--gold); }
+
+/* ============ v1.2: footer, profil, verifikasi ============ */
+#footer {
+  text-align: center; color: var(--muted); font-size: 12px;
+  padding: 26px 16px calc(96px + env(safe-area-inset-bottom));
+  letter-spacing: .3px;
+}
+.photo-thumb {
+  max-width: 220px; width: 100%; border-radius: 12px; display: block;
+  border: 1px solid rgba(232,194,106,.25); cursor: zoom-in;
+}
+.verify-row {
+  display: flex; gap: 12px; align-items: flex-start;
+  padding: 12px 0; border-top: 1px solid rgba(255,255,255,.07);
+}
+.verify-row:first-of-type { border-top: none; }
+.verify-val {
+  background: #0e1712; border: 1px solid rgba(255,255,255,.08);
+  border-radius: 10px; padding: 8px 12px; font-weight: 600; margin-bottom: 6px;
+  word-break: break-word;
+}

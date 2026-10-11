@@ -3,6 +3,7 @@
 const { getJSON } = require('../lib/store');
 const { requireAuth, send } = require('../lib/auth');
 const { calcLateFee, todayStr } = require('../lib/calc');
+const { countPending } = require('../lib/profile');
 
 function addDaysStr(base, n) {
   return new Date(new Date(base + 'T00:00:00Z').getTime() + n * 864e5).toISOString().slice(0, 10);
@@ -20,6 +21,7 @@ module.exports = requireAuth(async (req, res) => {
   const late = [];
   let activeLoans = 0;
   let pendingLoans = 0;
+  let pendingVerifikasi = 0;
   const today = todayStr();
   const weekAhead = addDaysStr(today, 7);
 
@@ -46,7 +48,9 @@ module.exports = requireAuth(async (req, res) => {
   let pendingBorrowers = 0;
   for (const ph of userPhones) {
     const u = await getJSON('user:' + ph);
-    if (u && u.status === 'pending') pendingBorrowers++;
+    if (!u) continue;
+    if (u.status === 'pending') pendingBorrowers++;
+    pendingVerifikasi += countPending(u.profile);
   }
   let pendingClaims = 0;
   for (const id of claimIds) {
@@ -59,7 +63,7 @@ module.exports = requireAuth(async (req, res) => {
 
   return send(res, 200, {
     ok: true,
-    outstanding, activeLoans, pendingLoans, pendingBorrowers, pendingClaims,
+    outstanding, activeLoans, pendingLoans, pendingBorrowers, pendingClaims, pendingVerifikasi,
     dueThisWeek, late,
   });
 }, { admin: true });
