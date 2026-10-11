@@ -46,16 +46,19 @@ Total tagihan = Pokok + (Pokok x 0,2% x tenor hari) + Rp 2.000 (biaya layanan)
 
 | Method | Endpoint | Akses | Fungsi |
 |---|---|---|---|
-| POST | `/api/auth-register` | publik | daftar peminjam (status pending) |
-| POST | `/api/auth-login` | publik | login -> token (Bearer) |
+| POST | `/api/auth` | publik | daftar (`action:register`) / login -> token (Bearer) (`action:login`) |
 | GET | `/api/me` | login | profil sesi |
-| GET/POST | `/api/borrowers` | admin | daftar / setujui + atur limit |
+| GET/POST | `/api/borrowers` | admin | daftar / setujui + atur limit / hapus akun (`action:delete`) |
 | POST | `/api/simulate` | login | simulasi hitungan |
 | GET/POST | `/api/loans` | login | daftar / ajukan pinjaman |
-| POST | `/api/loan-decide` | admin | setujui (buat jadwal) / tolak |
+| POST | `/api/loan-decide` | admin | setujui (buat jadwal) / tolak / batalkan pinjaman berjalan (`action:cancel`) |
 | GET/POST | `/api/payments` | login | lapor bayar / konfirmasi (admin) |
 | GET | `/api/admin-stats` | admin | outstanding, jatuh tempo, telat |
 | GET/POST | `/api/settings` | login/admin | info pembayaran (Dana/ShopeePay/QRIS) |
+| GET/POST | `/api/profile` | login | data diri: lihat / kirim-ubah (peminjam) / verifikasi (`action:verify`, admin) |
+
+Catatan: paket Hobby Vercel membatasi **maksimal 12 Serverless Functions** per deployment —
+endpoint yang serumpun digabung dalam satu file via parameter `action` (v1.3.1: 10 function).
 
 Aturan v1: satu peminjam hanya boleh punya **satu pinjaman aktif** dalam satu waktu.
 

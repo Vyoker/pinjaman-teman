@@ -1,7 +1,7 @@
 'use strict';
 /* Pinjaman Teman — SPA frontend (Bootstrap 5 + animasi) */
 
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.3.1';
 const $ = (s) => document.querySelector(s);
 const main = $('#main'), nav = $('#nav'), topbar = $('#topbar');
 
@@ -68,7 +68,7 @@ async function api(path, method = 'GET', body) {
   const r = await fetch(path, opt);
   const j = await r.json().catch(() => ({ ok: false, error: 'Respons server tidak valid.' }));
   // 401 pada pemanggilan login = kredensial salah (bukan sesi berakhir) -> tampilkan pesan aslinya
-  if (r.status === 401 && path !== '/api/auth-login') { logout(); throw new Error('Sesi berakhir. Silakan login lagi.'); }
+  if (r.status === 401 && path !== '/api/auth') { logout(); throw new Error('Sesi berakhir. Silakan login lagi.'); }
   if (!j.ok) throw new Error(j.error || 'Terjadi kesalahan.');
   return j;
 }
@@ -154,7 +154,8 @@ function vLogin() {
   $('#to-reg').addEventListener('click', (e) => { e.preventDefault(); go('register'); });
   const doLogin = async () => {
     try {
-      const j = await api('/api/auth-login', 'POST', {
+      const j = await api('/api/auth', 'POST', {
+        action: 'login',
         phone: $('#f-phone').value, password: $('#f-pass').value,
       });
       S.token = j.token; S.role = j.role; S.name = j.name;
@@ -187,7 +188,8 @@ function vRegister() {
   $('#to-login').addEventListener('click', (e) => { e.preventDefault(); go('login'); });
   $('#b-reg').addEventListener('click', async () => {
     try {
-      const j = await api('/api/auth-register', 'POST', {
+      const j = await api('/api/auth', 'POST', {
+        action: 'register',
         name: $('#f-name').value, phone: $('#f-phone').value, password: $('#f-pass').value,
       });
       toast(j.message || 'Pendaftaran diterima.');
@@ -511,7 +513,7 @@ async function vPengajuan() {
   main.querySelectorAll('[data-cancel]').forEach((b) => b.addEventListener('click', async () => {
     if (!confirm('Batalkan pinjaman ini? Status menjadi dibatalkan dan tidak bisa dikembalikan.')) return;
     try {
-      await api('/api/loan-cancel', 'POST', { loanId: b.dataset.cancel });
+      await api('/api/loan-decide', 'POST', { action: 'cancel', loanId: b.dataset.cancel });
       toast('Pinjaman dibatalkan.');
       go('pengajuan');
     } catch (e) { toast(e.message, true); }
@@ -581,7 +583,7 @@ async function vPeminjam() {
   main.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
     if (!confirm(`Hapus akun ${b.dataset.del} permanen? Data akun hilang, riwayat pinjaman tetap tersimpan.`)) return;
     try {
-      await api('/api/user-delete', 'POST', { phone: b.dataset.del });
+      await api('/api/borrowers', 'POST', { action: 'delete', phone: b.dataset.del });
       toast('Akun dihapus.');
       go('peminjam');
     } catch (e) { toast(e.message, true); }
@@ -771,7 +773,7 @@ async function vVerifikasi() {
     if (!approve && !confirm('Tolak data ini? Peminjam bisa kirim ulang.')) return;
     btn.disabled = true;
     try {
-      await api('/api/profile-verify', 'POST', { phone, field, approve });
+      await api('/api/profile', 'POST', { action: 'verify', phone, field, approve });
       toast(approve ? 'Data disetujui. Bonus limit aktif.' : 'Data ditolak.');
       go('verifikasi');
     } catch (e) { toast(e.message, true); btn.disabled = false; }
