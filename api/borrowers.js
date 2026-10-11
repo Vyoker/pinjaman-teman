@@ -2,15 +2,22 @@
 // /api/borrowers (admin)
 //   GET  -> daftar peminjam
 //   POST { phone, approve, limit } -> setujui/tolak pendaftaran + atur limit
-const { getJSON, setJSON } = require('../lib/store');
+const { getJSON, setJSON, ensureStats } = require('../lib/store');
 const { requireAuth, readBody, send, normPhone } = require('../lib/auth');
+const { rankFor } = require('../lib/calc');
 
 async function listUsers() {
   const phones = (await getJSON('idx:users')) || [];
   const out = [];
   for (const ph of phones) {
     const u = await getJSON('user:' + ph);
-    if (u) out.push({ name: u.name, phone: u.phone, status: u.status, limit: u.limit, createdAt: u.createdAt });
+    if (!u) continue;
+    const stats = ensureStats(u);
+    const { current } = rankFor(stats.payments);
+    out.push({
+      name: u.name, phone: u.phone, status: u.status, limit: u.limit,
+      createdAt: u.createdAt, stats, rank: current ? current.name : null,
+    });
   }
   return out;
 }

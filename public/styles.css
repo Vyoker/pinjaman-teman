@@ -264,6 +264,14 @@ input[type="range"].form-range::-webkit-slider-runnable-track {
   border: 1px solid var(--line);
 }
 
+#storageWarn {
+  display: flex; align-items: center; justify-content: center;
+  gap: 2px; padding: 10px 14px; font-size: 12.5px; font-weight: 600;
+  background: rgba(251,191,36,.1); color: var(--warn);
+  border-bottom: 1px solid rgba(251,191,36,.25);
+  text-align: center; animation: fadeIn .4s ease;
+}
+
 #toast {
   position: fixed; left: 50%; bottom: 26px; transform: translate(-50%, 0);
   background: #10231b; color: var(--ink); border: 1px solid var(--emerald-deep);

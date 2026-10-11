@@ -31,6 +31,12 @@ function badge(st) {
   const cls = 'b-' + String(st).replace(/[^a-z]/gi, '');
   return `<span class="badge ${cls}">${esc(st)}</span>`;
 }
+/** Badge rank: { name, color, icon } atau null. */
+function rankBadge(rank) {
+  if (!rank) return '<span class="badge b-belum"><i class="bi bi-award me-1"></i>Belum ada rank</span>';
+  return `<span class="badge" style="background:${rank.color}22;color:${rank.color};border:1px solid ${rank.color}66">` +
+    `<i class="bi ${rank.icon} me-1"></i>${esc(rank.name)}</span>`;
+}
 /** delay stagger untuk animasi entrance: stagger(i) -> ' class="anim-in" style="--d:140ms"' */
 function stagger(i, cls) {
   return ` class="${cls || ''} anim-in" style="--d:${Math.min(i * 70, 560)}ms"`;
@@ -60,7 +66,8 @@ async function api(path, method = 'GET', body) {
   if (body !== undefined) { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); }
   const r = await fetch(path, opt);
   const j = await r.json().catch(() => ({ ok: false, error: 'Respons server tidak valid.' }));
-  if (r.status === 401) { logout(); throw new Error('Sesi berakhir. Silakan login lagi.'); }
+  // 401 pada pemanggilan login = kredensial salah (bukan sesi berakhir) -> tampilkan pesan aslinya
+  if (r.status === 401 && path !== '/api/auth-login') { logout(); throw new Error('Sesi berakhir. Silakan login lagi.'); }
   if (!j.ok) throw new Error(j.error || 'Terjadi kesalahan.');
   return j;
 }
@@ -68,7 +75,14 @@ async function api(path, method = 'GET', body) {
 function logout() {
   S.token = ''; S.role = ''; S.name = ''; S.phone = '';
   localStorage.removeItem('pt_token');
+  showStorageWarn(false);
   go('login');
+}
+
+/** Tampilkan/sembunyikan peringatan mode memori (KV belum terhubung). */
+function showStorageWarn(show) {
+  const el = document.getElementById('storageWarn');
+  if (el) el.classList.toggle('hidden', !show);
 }
 
 const NAVS = {
@@ -141,6 +155,7 @@ function vLogin() {
       });
       S.token = j.token; S.role = j.role; S.name = j.name;
       localStorage.setItem('pt_token', j.token);
+      showStorageWarn(j.storage === 'memory');
       go(j.role === 'admin' ? 'aDash' : 'bDash');
     } catch (e) { toast(e.message, true); }
   };
@@ -186,7 +201,7 @@ function loanCard(l, showSchedule, i) {
       <thead><tr><th>#</th><th>Jatuh tempo</th><th class="text-end">Jumlah</th><th>Status</th></tr></thead>
       <tbody>${l.schedule.map((s) => `<tr>
         <td>${s.n}/${l.nCicilan}</td><td>${fmtDate(s.dueDate)}</td>
-        <td class="text-end fw-bold">${fmtRp(s.amount)}</td><td>${badge(s.status)}</td>
+        <td class="text-end fw-bold">${fmtRp(s.amount)}${(s.lateFee || 0) > 0 ? `<div style="font-size:11px;color:var(--danger);font-weight:600">+denda ${fmtRp(s.lateFee)} (${s.daysLate}h)</div>` : ''}${s.lateFeePaid > 0 ? `<div style="font-size:11px" class="muted">denda lunas ${fmtRp(s.lateFeePaid)}</div>` : ''}</td><td>${badge(s.status)}</td>
       </tr>`).join('')}</tbody>
     </table></div>` : '';
   return `
@@ -208,6 +223,21 @@ async function vBDash() {
   const { loans } = await api('/api/loans');
   const active = loans.find((l) => l.status === 'diajukan' || l.status === 'berjalan');
   const hist = loans.filter((l) => l !== active);
+  const rk = me.rank, nx = me.nextRank, stt = me.stats || { payments: 0, loansLunas: 0, totalPinjam: 0 };
+  const pct = nx ? Math.min(100, Math.round((stt.payments / nx.min) * 100)) : 100;
+  const rankCard = `
+    <div${stagger(1, 'card')}>
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h3 class="mb-0"><i class="bi bi-trophy-fill me-2" style="color:var(--gold)"></i>Rank Saya</h3>${rankBadge(rk)}
+      </div>
+      <div class="kv"><span class="k">Pembayaran berhasil</span><span class="v">${stt.payments}x</span></div>
+      <div class="kv"><span class="k">Pinjaman lunas</span><span class="v">${stt.loansLunas}x</span></div>
+      <div class="kv"><span class="k">Total pernah pinjam</span><span class="v">${fmtRp(stt.totalPinjam)}</span></div>
+      ${nx ? `<div class="mt-2"><div class="d-flex justify-content-between"><span class="muted">Menuju ${esc(nx.name)}</span><span class="muted">${stt.payments}/${nx.min} pembayaran</span></div>
+        <div class="progress mt-1" style="height:10px;background:#0e1712"><div class="progress-bar" role="progressbar" style="width:${pct}%;background:linear-gradient(90deg,var(--emerald),${nx.color})"></div></div></div>`
+        : (rk ? `<p class="note mt-2"><i class="bi bi-gem me-1"></i>Rank tertinggi tercapai. Pertahankan!</p>` : '')}
+      <p class="muted mt-2 mb-0" style="font-size:12px">Denda telat: 1%/hari dari tagihan. Bayar tepat waktu untuk naik rank lebih cepat.</p>
+    </div>`;
   main.innerHTML = `
     <div${stagger(0, 'card hero-card')}>
       <div class="d-flex justify-content-between align-items-center mb-1">
@@ -216,10 +246,11 @@ async function vBDash() {
       <div class="kv"><span class="k">Limit pinjaman kamu</span><span class="v big" data-count="${me.limit}" data-count-kind="rp">…</span></div>
       ${active ? '' : '<button class="btn btn-primary w-100 mt-3" id="b-ajukan"><i class="bi bi-plus-circle-fill me-2"></i>Ajukan Pinjaman</button>'}
     </div>
+    ${rankCard}
     <div class="section-title">Pinjaman berjalan</div>
-    ${active ? loanCard(active, true, 1) : `<div${stagger(1, 'card')}><p class="muted mb-0"><i class="bi bi-inbox me-2"></i>Tidak ada pinjaman aktif.</p></div>`}
+    ${active ? loanCard(active, true, 2) : `<div${stagger(2, 'card')}><p class="muted mb-0"><i class="bi bi-inbox me-2"></i>Tidak ada pinjaman aktif.</p></div>`}
     <div class="section-title">Riwayat</div>
-    ${hist.map((l, i) => loanCard(l, false, i + 2)).join('') || `<div class="card anim-in"><p class="muted mb-0">Belum ada riwayat.</p></div>`}`;
+    ${hist.map((l, i) => loanCard(l, false, i + 3)).join('') || `<div class="card anim-in"><p class="muted mb-0">Belum ada riwayat.</p></div>`}`;
   const b = $('#b-ajukan');
   if (b) b.addEventListener('click', () => go('ajukan'));
 }
@@ -322,8 +353,9 @@ async function vBayar() {
     <div${stagger(idx, 'card')}>
       <div class="d-flex justify-content-between align-items-center mb-1">
         <div><strong>${title}</strong>
-        <div class="muted">Jatuh tempo ${fmtDate(s.dueDate)}</div></div>
-        <strong class="fs-5" style="color:var(--gold)">${fmtRp(s.amount)}</strong>
+        <div class="muted">Jatuh tempo ${fmtDate(s.dueDate)}${(s.daysLate || 0) > 0 ? ` &middot; <span style="color:var(--danger);font-weight:700">telat ${s.daysLate} hari</span>` : ''}</div></div>
+        <div class="text-end"><strong class="fs-5" style="color:var(--gold)">${fmtRp(s.totalDue ?? s.amount)}</strong>
+        ${(s.lateFee || 0) > 0 ? `<div class="muted" style="font-size:11px">termasuk denda ${fmtRp(s.lateFee)}</div>` : ''}</div>
       </div>
       <label class="form-label">Metode pembayaran</label>
       <select id="m-${key}" class="form-select">
@@ -332,7 +364,7 @@ async function vBayar() {
         <option value="qris">QRIS (+1% MDR)</option>
       </select>
       <div id="info-${key}" class="mt-2"></div>
-      <button class="btn btn-primary btn-sm mt-2" data-pay="${key}" data-loan="${l.id}" data-idx="${i}" data-amt="${s.amount}">
+      <button class="btn btn-primary btn-sm mt-2" data-pay="${key}" data-loan="${l.id}" data-idx="${i}">
         <i class="bi bi-send-fill me-1"></i>Lapor Sudah Bayar
       </button>
     </div>`;
@@ -344,11 +376,13 @@ async function vBayar() {
     shopeepay: settings.shopeepay ? 'ShopeePay: <strong>' + esc(settings.shopeepay) + '</strong>' : 'ShopeePay belum diisi admin',
     qris: settings.qrisNote ? 'QRIS: ' + esc(settings.qrisNote) : 'Info QRIS belum diisi admin',
   };
-  const updInfo = (key, amt) => {
+  const updInfo = (key, s) => {
     const m = $('#m-' + key).value;
-    const total = m === 'qris' ? Math.round(amt * 1.01) : amt;
+    const base = s.totalDue ?? s.amount;
+    const total = m === 'qris' ? Math.round(base * 1.01) : base;
     $('#info-' + key).innerHTML = `<div class="pay-info">
       <div><i class="bi bi-arrow-right-circle me-1"></i>${dest[m]}</div>
+      ${(s.lateFee || 0) > 0 ? `<div class="muted">Tagihan ${fmtRp(s.amount)} + denda telat ${fmtRp(s.lateFee)} (${s.daysLate} hari × 1%)</div>` : ''}
       <div class="total">Total bayar: ${fmtRp(total)}${m === 'qris' ? ' <span class="muted">(termasuk MDR 1%)</span>' : ''}</div>
       <div class="muted mt-1">Transfer dulu ke tujuan di atas, lalu tekan "Lapor Sudah Bayar".</div>
     </div>`;
@@ -356,8 +390,8 @@ async function vBayar() {
   items.forEach(({ l, s, i }) => {
     if (s.status !== 'belum') return;
     const key = l.id + '_' + i;
-    $('#m-' + key).addEventListener('change', () => updInfo(key, s.amount));
-    updInfo(key, s.amount);
+    $('#m-' + key).addEventListener('change', () => updInfo(key, s));
+    updInfo(key, s);
   });
   main.querySelectorAll('[data-pay]').forEach((b) => b.addEventListener('click', async () => {
     const key = b.dataset.pay;
@@ -393,8 +427,9 @@ async function vADash() {
   const row = (x, i) => `
     <div${stagger(i, 'card')}><div class="d-flex justify-content-between align-items-center">
       <div><strong>${esc(x.borrowerName)}</strong>
-      <div class="muted">${x.loanId}${x.n ? ` &middot; Cicilan ${x.n}/${x.nCicilan}` : ''} &middot; jatuh tempo ${fmtDate(x.dueDate)}</div></div>
-      <strong style="color:var(--gold)">${fmtRp(x.amount)}</strong></div></div>`;
+      <div class="muted">${x.loanId}${x.n ? ` &middot; Cicilan ${x.n}/${x.nCicilan}` : ''} &middot; jatuh tempo ${fmtDate(x.dueDate)}${(x.daysLate || 0) > 0 ? ` &middot; <span style="color:var(--danger);font-weight:700">telat ${x.daysLate} hari</span>` : ''}</div></div>
+      <div class="text-end"><strong style="color:var(--gold)">${fmtRp(x.totalDue ?? x.amount)}</strong>
+      ${(x.lateFee || 0) > 0 ? `<div class="muted" style="font-size:11px">termasuk denda ${fmtRp(x.lateFee)}</div>` : ''}</div></div></div>`;
   const stats = [
     ['Total outstanding', st.outstanding, 'rp', false],
     ['Pinjaman berjalan', st.activeLoans, 'num', false],
@@ -458,6 +493,7 @@ async function vKlaim() {
       <div class="d-flex justify-content-between align-items-center mb-2"><div>
         <strong>${esc(c.borrowerName)}</strong>
         <div class="muted">${c.loanId} &middot; via ${esc(c.payMethod.toUpperCase())} &middot; ${fmtDate(c.createdAt)}</div>
+        ${(c.lateFee || 0) > 0 ? `<div class="muted" style="color:var(--danger)">Tagihan ${fmtRp(c.baseAmount)} + denda ${fmtRp(c.lateFee)} (${c.daysLate} hari telat)</div>` : ''}
       </div><strong class="fs-5" style="color:var(--gold)">${fmtRp(c.amount)}</strong></div>
       <div class="d-flex gap-2">
         <button class="btn btn-primary btn-sm flex-fill" data-ok="${c.id}"><i class="bi bi-check-lg me-1"></i>Terima</button>
@@ -500,7 +536,8 @@ async function vPeminjam() {
     <div class="section-title">Peminjam aktif (${act.length})</div>
     ${act.map((b, i) => `
       <div${stagger(i, 'card')}><div class="d-flex justify-content-between align-items-center mb-2"><div>
-        <strong>${esc(b.name)}</strong><div class="muted">${esc(b.phone)}</div>
+        <strong>${esc(b.name)}</strong> ${b.rank ? `<span class="badge" style="background:#e8c26a22;color:var(--gold);border:1px solid #e8c26a66"><i class="bi bi-award me-1"></i>${esc(b.rank)}</span>` : ''}
+        <div class="muted">${esc(b.phone)} &middot; ${b.stats.payments}x bayar &middot; ${b.stats.loansLunas}x lunas &middot; ${fmtRp(b.stats.totalPinjam)} dipinjam</div>
       </div>${badge(b.status)}</div>
         <label class="form-label">Limit (Rp)</label>
         <div class="d-flex gap-2"><input type="number" id="l-${b.phone}" class="form-control" value="${b.limit}">
@@ -564,6 +601,7 @@ $('#btnLogout').addEventListener('click', logout);
   try {
     const me = await api('/api/me');
     S.role = me.role; S.name = me.name; S.phone = me.phone;
+    showStorageWarn(me.storage === 'memory');
     go(S.role === 'admin' ? 'aDash' : 'bDash');
   } catch { go('login'); }
 })();

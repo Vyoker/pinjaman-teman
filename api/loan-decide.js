@@ -2,7 +2,7 @@
 // POST /api/loan-decide (admin) { loanId, approve, tenorHari? }
 //   approve=true  -> tenor final (15-30, default usulan), hitung jadwal, status 'berjalan'
 //   approve=false -> status 'ditolak'
-const { getJSON, setJSON } = require('../lib/store');
+const { getJSON, setJSON, ensureStats } = require('../lib/store');
 const { requireAuth, readBody, send } = require('../lib/auth');
 const { calcLoan, MIN_TENOR, MAX_TENOR } = require('../lib/calc');
 
@@ -45,6 +45,12 @@ module.exports = requireAuth(async (req, res) => {
     loan.approvedAt = new Date(now).toISOString();
     loan.disbursedAt = loan.approvedAt; // v1: cair manual saat disetujui
     await setJSON('loan:' + loan.id, loan);
+    // Catat total pinjaman peminjam (untuk sistem rank)
+    const borrower = await getJSON('user:' + loan.borrowerPhone);
+    if (borrower) {
+      ensureStats(borrower).totalPinjam += loan.pokok;
+      await setJSON('user:' + loan.borrowerPhone, borrower);
+    }
     return send(res, 200, { ok: true, loan });
   } catch (e) {
     return send(res, 400, { ok: false, error: e.message });

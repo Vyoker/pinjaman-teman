@@ -11,7 +11,7 @@ const { EventEmitter } = require('events');
 const assert = require('assert');
 
 const calc = require('../lib/calc');
-const { isMemoryMode } = require('../lib/store');
+const { isMemoryMode, getJSON, setJSON } = require('../lib/store');
 
 assert.ok(isMemoryMode(), 'harus jalan dalam mode memori untuk tes');
 
@@ -79,6 +79,19 @@ function ok(cond, label) {
   assert.throws(() => calc.calcLoan(500000, 31, 'lunas'), /Tenor/, 'tenor >30 ditolak');
   console.log('  ok - validasi tenor');
 
+  console.log('== Tes denda & rank ==');
+  const lf = calc.calcLateFee(133000, '2026-10-01', '2026-10-06');
+  ok(lf.daysLate === 5 && lf.lateFee === 6650, 'denda 1%/hari x 5 hari = 6.650');
+  const lf0 = calc.calcLateFee(133000, '2026-10-06', '2026-10-06');
+  ok(lf0.daysLate === 0 && lf0.lateFee === 0, 'belum jatuh tempo = tanpa denda');
+  const lfEarly = calc.calcLateFee(133000, '2026-10-10', '2026-10-06');
+  ok(lfEarly.daysLate === 0 && lfEarly.lateFee === 0, 'bayar lebih awal = tanpa denda');
+  ok(calc.rankFor(0).current === null && calc.rankFor(0).next.name === 'Bronze', 'rank 0 pembayaran');
+  ok(calc.rankFor(9).current === null, 'rank 9 pembayaran masih kosong');
+  ok(calc.rankFor(10).current.name === 'Bronze', 'rank 10 = Bronze');
+  ok(calc.rankFor(25).current.name === 'Silver' && calc.rankFor(25).next.name === 'Gold', 'rank 25 = Silver, next Gold');
+  ok(calc.rankFor(55).current.name === 'Diamond' && calc.rankFor(55).next === null, 'rank 55 = Diamond (max)');
+
   console.log('== Tes alur API ==');
   // 1. registrasi
   let r = await call('../api/auth-register', { method: 'POST', body: { name: 'Budi', phone: '08123456789', password: 'budi123' } });
@@ -89,6 +102,7 @@ function ok(cond, label) {
   // 3. login admin
   r = await call('../api/auth-login', { method: 'POST', body: { phone: '0811000000', password: 'admin-kuat-123' } });
   ok(r.json.ok && r.json.role === 'admin', 'login admin');
+  ok(r.json.storage === 'memory', 'login info mode penyimpanan (memory saat tes)');
   const tA = r.json.token;
   // 4. admin setujui + limit
   r = await call('../api/borrowers', { method: 'POST', headers: auth(tA), body: { phone: '08123456789', approve: true, limit: 1000000 } });
@@ -141,6 +155,40 @@ function ok(cond, label) {
   // 16. tanpa token
   r = await call('../api/loans', { method: 'GET' });
   ok(r.status === 401, 'tanpa token -> 401');
+
+  console.log('== Tes e2e denda & statistik ==');
+  // 17. statistik & rank tercatat setelah alur pertama
+  r = await call('../api/me', { method: 'GET', headers: auth(tB) });
+  ok(r.json.stats.payments === 4 && r.json.stats.loansLunas === 1 && r.json.stats.totalPinjam === 500000,
+    'statistik: 4 bayar, 1 lunas, total pinjam 500rb');
+  ok(r.json.rank === null && r.json.nextRank.name === 'Bronze', 'rank masih kosong di 4 pembayaran');
+
+  // 18. pinjaman kedua, jatuh tempo dimundurkan 5 hari -> kena denda
+  r = await call('../api/loans', { method: 'POST', headers: auth(tB), body: { pokok: 300000, tenorHari: 15, metode: 'lunas' } });
+  assert.ok(r.json.ok, 'pengajuan kedua');
+  const loan2 = r.json.loan.id;
+  r = await call('../api/loan-decide', { method: 'POST', headers: auth(tA), body: { loanId: loan2, approve: true, tenorHari: 15 } });
+  assert.ok(r.json.ok, 'pinjaman kedua disetujui');
+  assert.strictEqual(r.json.loan.total, 311000, 'total pinjaman kedua 311.000');
+  const l2 = await getJSON('loan:' + loan2);
+  l2.schedule[0].dueDate = new Date(Date.now() - 5 * 864e5).toISOString().slice(0, 10);
+  await setJSON('loan:' + loan2, l2);
+  r = await call('../api/loans', { method: 'GET', headers: auth(tB) });
+  const it2 = r.json.loans[0].schedule[0];
+  ok(it2.daysLate === 5 && it2.lateFee === 15550 && it2.totalDue === 326550,
+    'denda tampil: 5 hari x 1% x 311.000 = 15.550');
+  // 19. klaim via dana (tanpa MDR) -> nominal termasuk denda
+  r = await call('../api/payments', { method: 'POST', headers: auth(tB), body: { action: 'claim', loanId: loan2, schedIdx: 0, payMethod: 'dana' } });
+  ok(r.json.ok && r.json.claim.lateFee === 15550 && r.json.claim.amount === 326550, 'klaim termasuk denda');
+  // 20. admin konfirmasi -> denda tercatat, statistik bertambah
+  r = await call('../api/payments', { method: 'POST', headers: auth(tA), body: { action: 'confirm', claimId: r.json.claim.id, approve: true } });
+  ok(r.json.ok && r.json.loan.status === 'lunas', 'pinjaman kedua lunas');
+  ok(r.json.loan.schedule[0].lateFeePaid === 15550, 'denda tercatat lunas');
+  r = await call('../api/me', { method: 'GET', headers: auth(tB) });
+  ok(r.json.stats.payments === 5 && r.json.stats.loansLunas === 2 && r.json.stats.totalPinjam === 800000,
+    'statistik terakumulasi: 5 bayar, 2 lunas, 800rb');
+  r = await call('../api/admin-stats', { method: 'GET', headers: auth(tA) });
+  ok(r.json.ok && r.json.outstanding === 0, 'outstanding kembali 0');
 
   console.log(`\nSEMUA TES LOLOS (${n} asersi)`);
 })().catch((e) => {

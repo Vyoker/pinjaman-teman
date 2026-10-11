@@ -2,10 +2,8 @@
 // GET /api/admin-stats (admin) -> ringkasan: outstanding, jatuh tempo minggu ini, telat, antrean
 const { getJSON } = require('../lib/store');
 const { requireAuth, send } = require('../lib/auth');
+const { calcLateFee, todayStr } = require('../lib/calc');
 
-function todayStr() {
-  return new Date().toISOString().slice(0, 10);
-}
 function addDaysStr(base, n) {
   return new Date(new Date(base + 'T00:00:00Z').getTime() + n * 864e5).toISOString().slice(0, 10);
 }
@@ -33,10 +31,12 @@ module.exports = requireAuth(async (req, res) => {
     activeLoans++;
     for (const s of l.schedule) {
       if (s.status === 'lunas') continue;
-      outstanding += s.amount;
+      const { daysLate, lateFee } = calcLateFee(s.amount, s.dueDate, today);
+      outstanding += s.amount + lateFee; // termasuk denda berjalan
       const info = {
         loanId: l.id, borrowerName: l.borrowerName, borrowerPhone: l.borrowerPhone,
-        n: s.n, nCicilan: l.nCicilan, dueDate: s.dueDate, amount: s.amount, status: s.status,
+        n: s.n, nCicilan: l.nCicilan, dueDate: s.dueDate, amount: s.amount,
+        status: s.status, daysLate, lateFee, totalDue: s.amount + lateFee,
       };
       if (s.dueDate < today) late.push(info);
       else if (s.dueDate <= weekAhead) dueThisWeek.push(info);

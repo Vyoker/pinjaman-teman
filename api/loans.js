@@ -4,7 +4,7 @@
 //   POST (peminjam) { pokok, tenorHari, metode } -> ajukan pinjaman (status 'diajukan')
 const { getJSON, setJSON, nextId } = require('../lib/store');
 const { requireAuth, readBody, send } = require('../lib/auth');
-const { MIN_TENOR, MAX_TENOR } = require('../lib/calc');
+const { MIN_TENOR, MAX_TENOR, calcLateFee, todayStr } = require('../lib/calc');
 
 async function idxPush(key, val) {
   const arr = (await getJSON(key)) || [];
@@ -22,6 +22,16 @@ async function listLoans(filter) {
     out.push(l);
   }
   out.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  // Tambahkan info denda berjalan (dihitung, tidak disimpan)
+  const today = todayStr();
+  for (const l of out) {
+    if (l.status !== 'berjalan' || !Array.isArray(l.schedule)) continue;
+    l.schedule = l.schedule.map((s) => {
+      if (s.status === 'lunas') return { ...s, daysLate: 0, lateFee: 0, totalDue: s.amount };
+      const { daysLate, lateFee } = calcLateFee(s.amount, s.dueDate, today);
+      return { ...s, daysLate, lateFee, totalDue: s.amount + lateFee };
+    });
+  }
   return out;
 }
 

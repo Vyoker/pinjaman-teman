@@ -25,16 +25,21 @@ git push -u origin main
 5. Klik **Deploy**. Tunggu sampai live, catat URL-nya
    (cth. `https://pinjaman-teman.vercel.app`).
 
-## 3. Aktifkan database (Vercel KV)
+## 3. Aktifkan database (Upstash Redis — pengganti Vercel KV)
 
-1. Di dashboard project → tab **Storage** → **Create Database** → pilih **KV**.
-2. Beri nama (cth. `pinjaman-kv`) → Create.
-3. Pilih **Connect** ke project `pinjaman-teman`.
+> Catatan: Vercel sudah mempensiunkan produk "KV" mandiri. Penggantinya adalah
+> **Upstash Redis** dari Marketplace — env var yang diisi otomatis tetap
+> `KV_REST_API_URL` dan `KV_REST_API_TOKEN`, jadi kode tidak perlu diubah.
+
+1. Di dashboard project → tab **Storage** → tap **Upstash**.
+2. **Create** database Redis baru (nama cth. `pinjaman-kv`, region pilih Singapore).
+3. **Connect** / hubungkan ke project `pinjaman-teman`.
 4. Vercel otomatis mengisi `KV_REST_API_URL` dan `KV_REST_API_TOKEN`.
 5. **Redeploy** project (Deployments → ⋯ → Redeploy) agar env terbaca.
 
 Tanpa langkah ini aplikasi jalan tapi data hanya di memori
-(hilang tiap fungsi cold-start) — JANGAN dipakai produksi.
+(hilang tiap fungsi cold-start, dan sesi login langsung kedaluwarsa)
+— JANGAN dipakai produksi.
 
 ## 4. Isi info pembayaran (sebagai admin)
 

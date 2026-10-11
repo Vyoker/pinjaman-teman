@@ -16,6 +16,13 @@ Total tagihan = Pokok + (Pokok x 0,2% x tenor hari) + Rp 2.000 (biaya layanan)
   pembulatan masuk angsuran terakhir).
 - Bayar via Dana / ShopeePay / QRIS. QRIS kena **+1% MDR per transaksi**
   (dihitung dari total tagihan).
+- **Denda telat (v1.1)**: 1%/hari (flat, tidak berbunga-berbunga) dari nominal
+  tagihan yang lewat jatuh tempo, dihitung per item cicilan. Denda dihitung
+  sampai tanggal lapor bayar dan ikut ditagihkan saat pembayaran.
+- **Rank (v1.1)**: naik berdasarkan jumlah pembayaran berhasil —
+  Bronze 10x, Silver 20x, Gold 30x, Platinum 40x, Diamond 50x.
+  Statistik per peminjam (pembayaran berhasil, pinjaman lunas, total pinjam)
+  tampil di dashboard.
 
 ## Arsitektur
 
