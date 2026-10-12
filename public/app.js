@@ -1,7 +1,7 @@
 'use strict';
 /* Pinjaman Teman — SPA frontend (Bootstrap 5 + animasi) */
 
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.4.1';
 const $ = (s) => document.querySelector(s);
 /** Pasang handler ke semua elemen yang cocok (pengganti pola querySelectorAll berulang). */
 const bindAll = (sel, ev, fn) => document.querySelectorAll(sel).forEach((el) => el.addEventListener(ev, fn));
@@ -70,7 +70,7 @@ async function api(path, method = 'GET', body) {
   const r = await fetch(path, opt);
   const j = await r.json().catch(() => ({ ok: false, error: 'Respons server tidak valid.' }));
   // 401 pada pemanggilan login = kredensial salah (bukan sesi berakhir) -> tampilkan pesan aslinya
-  if (r.status === 401 && path !== '/api/auth-login') { logout(); throw new Error('Sesi berakhir. Silakan login lagi.'); }
+  if (r.status === 401 && path !== '/api/auth') { logout(); throw new Error('Sesi berakhir. Silakan login lagi.'); }
   if (!j.ok) throw new Error(j.error || 'Terjadi kesalahan.');
   return j;
 }
@@ -170,8 +170,8 @@ function vLogin() {
   $('#to-reg').addEventListener('click', (e) => { e.preventDefault(); go('register'); });
   const doLogin = async () => {
     try {
-      const j = await api('/api/auth-login', 'POST', {
-        phone: $('#f-phone').value, password: $('#f-pass').value,
+      const j = await api('/api/auth', 'POST', {
+        action: 'login', phone: $('#f-phone').value, password: $('#f-pass').value,
       });
       S.token = j.token; S.role = j.role; S.name = j.name;
       localStorage.setItem('pt_token', j.token);
@@ -203,8 +203,8 @@ function vRegister() {
   $('#to-login').addEventListener('click', (e) => { e.preventDefault(); go('login'); });
   $('#b-reg').addEventListener('click', async () => {
     try {
-      const j = await api('/api/auth-register', 'POST', {
-        name: $('#f-name').value, phone: $('#f-phone').value, password: $('#f-pass').value,
+      const j = await api('/api/auth', 'POST', {
+        action: 'register', name: $('#f-name').value, phone: $('#f-phone').value, password: $('#f-pass').value,
       });
       toast(j.message || 'Pendaftaran diterima.');
       go('login');
@@ -758,8 +758,8 @@ async function vAkun() {
   });
   $('#pc-save').addEventListener('click', async () => {
     try {
-      await api('/api/pencairan', 'POST', {
-        metode: $('#pc-metode').value, nomor: $('#pc-nomor').value,
+      await api('/api/profile', 'POST', {
+        action: 'pencairan', metode: $('#pc-metode').value, nomor: $('#pc-nomor').value,
         atasNama: $('#pc-nama').value, namaBank: $('#pc-bank').value,
       });
       toast('Data pencairan tersimpan.');
@@ -862,7 +862,7 @@ async function vNotif() {
 
 async function vBroadcast() {
   const { borrowers } = await api('/api/borrowers');
-  const { history } = await api('/api/broadcast');
+  const { history } = await api('/api/notifications');
   const act = borrowers.filter((b) => b.status === 'active');
   main.innerHTML = `
     <div${stagger(0, 'card')}>
@@ -906,7 +906,7 @@ async function vBroadcast() {
     if (mode === 'selected' && !phones.length) return toast('Pilih minimal satu user.', true);
     if (!confirm('Kirim broadcast ini?')) return;
     try {
-      const r = await api('/api/broadcast', 'POST', { mode, phones, message });
+      const r = await api('/api/notifications', 'POST', { mode, phones, message });
       toast(`Broadcast terkirim (${r.sent} notifikasi).`);
       go('broadcast');
     } catch (e) { toast(e.message, true); }

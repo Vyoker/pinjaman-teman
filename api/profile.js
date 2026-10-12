@@ -4,7 +4,7 @@
 //   POST { action:'verify', phone, field, approve } (admin) -> setujui/tolak satu data
 const { getJSON, setJSON } = require('../lib/store');
 const { requireAuth, readBody, send, normPhone } = require('../lib/auth');
-const { FIELD_MAP, ensureProfile, validateField, limitBonus, maxBonus, effectiveLimit } = require('../lib/profile');
+const { FIELD_MAP, ensureProfile, validateField, validatePencairan, limitBonus, maxBonus, effectiveLimit } = require('../lib/profile');
 
 function shape(user) {
   const profile = ensureProfile(user);
@@ -43,6 +43,17 @@ module.exports = requireAuth(async (req, res) => {
 
   if (req.method === 'POST') {
     const body = await readBody(req);
+    // Peminjam: simpan data pencairan (gabungan pencairan.js sejak v1.4.1)
+    if (body.action === 'pencairan') {
+      if (sess.role !== 'borrower') return send(res, 403, { ok: false, error: 'Khusus peminjam.' });
+      const check = validatePencairan(body);
+      if (!check.ok) return send(res, 400, { ok: false, error: check.error });
+      const user = await getJSON('user:' + sess.phone);
+      if (!user) return send(res, 404, { ok: false, error: 'Akun tidak ditemukan.' });
+      user.pencairan = check.value;
+      await setJSON('user:' + sess.phone, user);
+      return send(res, 200, { ok: true, pencairan: user.pencairan });
+    }
     // Admin: verifikasi satu data (setujui/tolak)
     if (body.action === 'verify') {
       if (sess.role !== 'admin') return send(res, 403, { ok: false, error: 'Khusus admin.' });

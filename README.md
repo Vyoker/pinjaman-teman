@@ -54,8 +54,7 @@ Total tagihan = Pokok + (Pokok x 0,2% x tenor hari) + Rp 2.000 (biaya layanan)
 
 | Method | Endpoint | Akses | Fungsi |
 |---|---|---|---|
-| POST | `/api/auth-register` | publik | daftar peminjam (status pending) |
-| POST | `/api/auth-login` | publik | login -> token (Bearer) |
+| POST | `/api/auth` | publik | `{action:'register'}` daftar peminjam (pending) / `{action:'login'}` login -> token |
 | GET | `/api/me` | login | profil sesi |
 | GET/POST | `/api/borrowers` | admin | daftar / setujui + atur limit |
 | POST | `/api/simulate` | login | simulasi hitungan |
