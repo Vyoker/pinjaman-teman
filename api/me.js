@@ -16,6 +16,7 @@ module.exports = requireAuth(async (req, res) => {
     out.limit = user ? user.limit : 0;
     out.bonusLimit = user ? limitBonus(user.profile) : 0;
     out.effectiveLimit = user ? effectiveLimit(user) : 0;
+    out.pencairan = user ? user.pencairan || null : null;
     out.status = user ? user.status : 'unknown';
     out.stats = stats;
     out.rank = current;

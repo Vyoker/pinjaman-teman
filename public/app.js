@@ -1,8 +1,10 @@
 'use strict';
 /* Pinjaman Teman — SPA frontend (Bootstrap 5 + animasi) */
 
-const APP_VERSION = '1.3.1';
+const APP_VERSION = '1.4.0';
 const $ = (s) => document.querySelector(s);
+/** Pasang handler ke semua elemen yang cocok (pengganti pola querySelectorAll berulang). */
+const bindAll = (sel, ev, fn) => document.querySelectorAll(sel).forEach((el) => el.addEventListener(ev, fn));
 const main = $('#main'), nav = $('#nav'), topbar = $('#topbar');
 
 const S = { token: localStorage.getItem('pt_token') || '', role: '', name: '', phone: '' };
@@ -68,7 +70,7 @@ async function api(path, method = 'GET', body) {
   const r = await fetch(path, opt);
   const j = await r.json().catch(() => ({ ok: false, error: 'Respons server tidak valid.' }));
   // 401 pada pemanggilan login = kredensial salah (bukan sesi berakhir) -> tampilkan pesan aslinya
-  if (r.status === 401 && path !== '/api/auth') { logout(); throw new Error('Sesi berakhir. Silakan login lagi.'); }
+  if (r.status === 401 && path !== '/api/auth-login') { logout(); throw new Error('Sesi berakhir. Silakan login lagi.'); }
   if (!j.ok) throw new Error(j.error || 'Terjadi kesalahan.');
   return j;
 }
@@ -100,6 +102,7 @@ const NAVS = {
     ['klaim', 'Pembayaran', 'bi-arrow-left-right'],
     ['peminjam', 'Peminjam', 'bi-people-fill'],
     ['verifikasi', 'Verifikasi', 'bi-patch-check-fill'],
+    ['broadcast', 'Broadcast', 'bi-megaphone-fill'],
     ['pengaturan', 'Pengaturan', 'bi-gear-fill'],
   ],
 };
@@ -109,6 +112,7 @@ function renderChrome() {
   topbar.classList.toggle('hidden', !logged);
   nav.classList.toggle('hidden', !logged);
   $('#footer').classList.toggle('hidden', !logged);
+  $('#btnNotif').classList.toggle('hidden', !(logged && S.role === 'borrower'));
   if (!logged) return;
   $('#userName').textContent = S.name + (S.role === 'admin' ? ' (Admin)' : '');
   nav.innerHTML = NAVS[S.role].map(([v, l, ic]) =>
@@ -132,6 +136,18 @@ async function go(view) {
     main.innerHTML = `<div class="card anim-in"><p class="text-danger mb-0"><i class="bi bi-exclamation-triangle-fill me-2"></i>${esc(e.message)}</p></div>`;
   }
   window.scrollTo(0, 0);
+  refreshNotifBadge();
+}
+
+/** Perbarui lencana jumlah notifikasi belum dibaca di bel topbar. */
+async function refreshNotifBadge() {
+  if (!S.token || S.role !== 'borrower') return;
+  try {
+    const r = await api('/api/notifications');
+    const b = $('#notifBadge');
+    b.textContent = r.unread > 9 ? '9+' : String(r.unread);
+    b.classList.toggle('hidden', !r.unread);
+  } catch { /* abaikan */ }
 }
 
 /* ============ AUTH ============ */
@@ -154,8 +170,7 @@ function vLogin() {
   $('#to-reg').addEventListener('click', (e) => { e.preventDefault(); go('register'); });
   const doLogin = async () => {
     try {
-      const j = await api('/api/auth', 'POST', {
-        action: 'login',
+      const j = await api('/api/auth-login', 'POST', {
         phone: $('#f-phone').value, password: $('#f-pass').value,
       });
       S.token = j.token; S.role = j.role; S.name = j.name;
@@ -188,8 +203,7 @@ function vRegister() {
   $('#to-login').addEventListener('click', (e) => { e.preventDefault(); go('login'); });
   $('#b-reg').addEventListener('click', async () => {
     try {
-      const j = await api('/api/auth', 'POST', {
-        action: 'register',
+      const j = await api('/api/auth-register', 'POST', {
         name: $('#f-name').value, phone: $('#f-phone').value, password: $('#f-pass').value,
       });
       toast(j.message || 'Pendaftaran diterima.');
@@ -273,6 +287,7 @@ async function vAjukan() {
     <div${stagger(0, 'card')}>
       <h3><i class="bi bi-plus-circle-fill me-2" style="color:var(--gold)"></i>Ajukan Pinjaman</h3>
       <div class="kv"><span class="k">Limit kamu</span><span class="v">${fmtRp(me.effectiveLimit ?? me.limit)}${(me.bonusLimit || 0) > 0 ? ` <span class="muted" style="font-size:12px">(termasuk bonus ${fmtRp(me.bonusLimit)})</span>` : ''}</span></div>
+      ${!me.pencairan ? '<p class="note warn"><i class="bi bi-exclamation-triangle-fill me-1"></i>Kamu belum mengisi data pencairan. Isi dulu di menu Akun agar pinjaman bisa dicairkan.</p>' : ''}
       <label class="form-label">Jumlah pokok (Rp)</label>
       <input id="a-pokok" class="form-control" type="number" min="1000" step="1000" placeholder="500000">
       <label class="form-label">Tenor: <strong id="a-tenor-lbl" style="color:var(--gold)">30</strong> hari</label>
@@ -465,12 +480,21 @@ async function vADash() {
 async function vPengajuan() {
   const { loans: pending } = await api('/api/loans?status=diajukan');
   const { loans: running } = await api('/api/loans?status=berjalan');
+  const { borrowers } = await api('/api/borrowers');
+  const pcMap = Object.fromEntries(borrowers.map((b) => [b.phone, b.pencairan]));
+  const pcTxt = (phone) => {
+    const p = pcMap[phone];
+    if (!p) return '<span style="color:var(--danger)">Belum diisi — tidak bisa dicairkan</span>';
+    const m = { dana: 'Dana', shopeepay: 'ShopeePay', bank: 'Bank' }[p.metode] || p.metode;
+    return `${m}${p.namaBank ? ' ' + esc(p.namaBank) : ''} &middot; ${esc(p.nomor)} &middot; a.n. ${esc(p.atasNama)}`;
+  };
   const secPengajuan = '<div class="section-title">Pengajuan pinjaman</div>' + (pending.map((l, i) => `
     <div${stagger(i, 'card')}>
       <div class="d-flex justify-content-between align-items-center mb-2"><strong>${esc(l.borrowerName)}</strong>${badge(l.status)}</div>
       <div class="kv"><span class="k">Pokok</span><span class="v">${fmtRp(l.pokok)}</span></div>
       <div class="kv"><span class="k">Usulan tenor</span><span class="v">${l.tenorProposal} hari</span></div>
       <div class="kv"><span class="k">Metode</span><span class="v">${l.metode === 'cicilan' ? 'Cicilan' : 'Sekaligus'}</span></div>
+      <div class="kv"><span class="k">Pencairan</span><span class="v">${pcTxt(l.borrowerPhone)}</span></div>
       <div class="kv"><span class="k">Diajukan</span><span class="v">${fmtDate(l.createdAt)}</span></div>
       <label class="form-label">Tenor final (15–30 hari)</label>
       <input type="number" id="t-${l.id}" class="form-control" min="15" max="30" value="${l.tenorProposal}">
@@ -496,8 +520,8 @@ async function vPengajuan() {
   main.innerHTML = secPengajuan + secBerjalan;
   main.querySelectorAll('[data-ok]').forEach((b) => b.addEventListener('click', async () => {
     try {
-      await api('/api/loan-decide', 'POST', {
-        loanId: b.dataset.ok, approve: true, tenorHari: Number($('#t-' + b.dataset.ok).value),
+      await api('/api/loan-action', 'POST', {
+        action: 'decide', loanId: b.dataset.ok, approve: true, tenorHari: Number($('#t-' + b.dataset.ok).value),
       });
       toast('Pinjaman disetujui. Jadwal dibuat otomatis.');
       go('pengajuan');
@@ -505,7 +529,7 @@ async function vPengajuan() {
   }));
   main.querySelectorAll('[data-no]').forEach((b) => b.addEventListener('click', async () => {
     try {
-      await api('/api/loan-decide', 'POST', { loanId: b.dataset.no, approve: false });
+      await api('/api/loan-action', 'POST', { action: 'decide', loanId: b.dataset.no, approve: false });
       toast('Pengajuan ditolak.');
       go('pengajuan');
     } catch (e) { toast(e.message, true); }
@@ -513,7 +537,7 @@ async function vPengajuan() {
   main.querySelectorAll('[data-cancel]').forEach((b) => b.addEventListener('click', async () => {
     if (!confirm('Batalkan pinjaman ini? Status menjadi dibatalkan dan tidak bisa dikembalikan.')) return;
     try {
-      await api('/api/loan-decide', 'POST', { action: 'cancel', loanId: b.dataset.cancel });
+      await api('/api/loan-action', 'POST', { action: 'cancel', loanId: b.dataset.cancel });
       toast('Pinjaman dibatalkan.');
       go('pengajuan');
     } catch (e) { toast(e.message, true); }
@@ -691,11 +715,33 @@ async function vAkun() {
       <div class="progress mt-2" style="height:10px;background:#0e1712"><div class="progress-bar" style="width:${pct}%;background:linear-gradient(90deg,var(--emerald),var(--gold))"></div></div>
       <p class="muted mt-1 mb-0" style="font-size:12px">Bonus ${fmtRp(d.bonus)} dari maks ${fmtRp(d.maxBonus)}. Setiap data diverifikasi manual oleh admin sebelum bonus aktif.</p>
     </div>
+    <div${stagger(1, 'card')}>
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h3 class="mb-0"><i class="bi bi-send-fill me-2" style="color:var(--gold)"></i>Data Pencairan</h3>
+        ${d.pencairan ? '<span class="badge b-diterima">Terisi</span>' : '<span class="badge b-ditolak">Wajib diisi</span>'}
+      </div>
+      <p class="muted">Tujuan pengiriman dana saat pinjaman disetujui. Wajib diisi sebelum pencairan.</p>
+      <label class="form-label">Metode</label>
+      <select id="pc-metode" class="form-select">
+        <option value="dana" ${d.pencairan && d.pencairan.metode === 'dana' ? 'selected' : ''}>Dana</option>
+        <option value="shopeepay" ${d.pencairan && d.pencairan.metode === 'shopeepay' ? 'selected' : ''}>ShopeePay</option>
+        <option value="bank" ${d.pencairan && d.pencairan.metode === 'bank' ? 'selected' : ''}>Bank (ATM)</option>
+      </select>
+      <div id="pc-bank-wrap" class="${d.pencairan && d.pencairan.metode === 'bank' ? '' : 'hidden'}">
+        <label class="form-label">Nama bank</label>
+        <input id="pc-bank" class="form-control" value="${esc(d.pencairan ? d.pencairan.namaBank : '')}" placeholder="cth: BCA">
+      </div>
+      <label class="form-label">Nomor tujuan (HP / rekening)</label>
+      <input id="pc-nomor" class="form-control" inputmode="numeric" value="${esc(d.pencairan ? d.pencairan.nomor : '')}" placeholder="08xxxxxxxxxx / nomor rekening">
+      <label class="form-label">Atas nama</label>
+      <input id="pc-nama" class="form-control" value="${esc(d.pencairan ? d.pencairan.atasNama : '')}" placeholder="Nama pemilik akun">
+      <button class="btn btn-primary btn-sm mt-3" id="pc-save"><i class="bi bi-check-lg me-1"></i>Simpan Data Pencairan</button>
+    </div>
     <div class="section-title">Data Diri</div>
     ${d.fields.map((f, i) => {
       const cur = d.profile[f.key] || { value: '', status: 'belum' };
       return `
-      <div${stagger(i + 1, 'card')}>
+      <div${stagger(i + 2, 'card')}>
         <div class="d-flex justify-content-between align-items-center mb-2">
           <strong>${esc(f.label)} <span class="muted" style="font-size:12px">+${fmtRp(f.bonus)}</span></strong>
           ${PF_STATUS[cur.status] || PF_STATUS.belum}
@@ -706,6 +752,20 @@ async function vAkun() {
         </button>
       </div>`;
     }).join('')}`;
+
+  $('#pc-metode').addEventListener('change', (e) => {
+    $('#pc-bank-wrap').classList.toggle('hidden', e.target.value !== 'bank');
+  });
+  $('#pc-save').addEventListener('click', async () => {
+    try {
+      await api('/api/pencairan', 'POST', {
+        metode: $('#pc-metode').value, nomor: $('#pc-nomor').value,
+        atasNama: $('#pc-nama').value, namaBank: $('#pc-bank').value,
+      });
+      toast('Data pencairan tersimpan.');
+      go('akun');
+    } catch (e) { toast(e.message, true); }
+  });
 
   main.querySelectorAll('[data-pfsend]').forEach((btn) => btn.addEventListener('click', async () => {
     const key = btn.dataset.pfsend;
@@ -780,13 +840,87 @@ async function vVerifikasi() {
   }));
 }
 
+async function vNotif() {
+  const { notifications } = await api('/api/notifications');
+  if (!notifications.length) {
+    main.innerHTML = `<div${stagger(0, 'card')}><p class="muted mb-0"><i class="bi bi-bell me-2"></i>Belum ada notifikasi.</p></div>`;
+    return;
+  }
+  main.innerHTML = '<div class="section-title">Notifikasi</div>' + notifications.map((n, i) => `
+    <div${stagger(i, 'card' + (n.read ? '' : ' notif-unread'))}>
+      <div class="d-flex gap-2">
+        <i class="bi bi-megaphone-fill mt-1" style="color:var(--gold)"></i>
+        <div class="flex-fill">
+          <p class="mb-1" style="white-space:pre-wrap">${esc(n.message)}</p>
+          <div class="muted">${fmtDate(n.createdAt)}${n.read ? '' : ' &middot; <strong style="color:var(--gold)">Baru</strong>'}</div>
+        </div>
+      </div>
+    </div>`).join('');
+  // Buka halaman ini = tandai semua sudah dibaca
+  api('/api/notifications', 'POST', { action: 'readAll' }).then(refreshNotifBadge).catch(() => {});
+}
+
+async function vBroadcast() {
+  const { borrowers } = await api('/api/borrowers');
+  const { history } = await api('/api/broadcast');
+  const act = borrowers.filter((b) => b.status === 'active');
+  main.innerHTML = `
+    <div${stagger(0, 'card')}>
+      <h3><i class="bi bi-megaphone-fill me-2" style="color:var(--gold)"></i>Broadcast Notifikasi</h3>
+      <label class="form-label">Kirim ke</label>
+      <div class="radio-cards">
+        <label><input type="radio" name="bc-mode" value="all" checked> Semua user</label>
+        <label><input type="radio" name="bc-mode" value="selected"> User tertentu</label>
+      </div>
+      <div id="bc-users" class="hidden mt-2">
+        ${act.map((b) => `<label class="d-flex align-items-center gap-2 mb-1"><input type="checkbox" class="form-check-input bc-chk" value="${esc(b.phone)}"> ${esc(b.name)} <span class="muted">${esc(b.phone)}</span></label>`).join('') || '<p class="muted mb-0">Tidak ada user aktif.</p>'}
+      </div>
+      <label class="form-label">Pesan</label>
+      <div class="d-flex gap-2 mb-2">
+        <button class="btn btn-outline-light btn-sm" id="bc-tpl-due"><i class="bi bi-alarm me-1"></i>Template jatuh tempo</button>
+        <button class="btn btn-outline-light btn-sm" id="bc-tpl-info"><i class="bi bi-info-circle me-1"></i>Template info</button>
+      </div>
+      <textarea id="bc-msg" class="form-control" rows="4" maxlength="500" placeholder="Tulis pesan untuk peminjam…"></textarea>
+      <button class="btn btn-primary w-100 mt-3" id="bc-send"><i class="bi bi-send-fill me-2"></i>Kirim Broadcast</button>
+    </div>
+    <div class="section-title">Riwayat broadcast</div>
+    ${history.map((h, i) => `
+      <div${stagger(i + 1, 'card')}>
+        <div class="d-flex justify-content-between"><strong>${esc(h.targetName || h.to)}</strong><span class="muted">${fmtDate(h.createdAt)}</span></div>
+        <p class="mb-0 mt-1" style="white-space:pre-wrap">${esc(h.message)}</p>
+      </div>`).join('') || `<div class="card anim-in"><p class="muted mb-0">Belum ada broadcast.</p></div>`}`;
+
+  bindAll('input[name="bc-mode"]', 'change', () => {
+    const sel = document.querySelector('input[name="bc-mode"]:checked').value === 'selected';
+    $('#bc-users').classList.toggle('hidden', !sel);
+  });
+  $('#bc-tpl-due').addEventListener('click', () => {
+    $('#bc-msg').value = 'Pengingat: tagihan/cicilan Anda jatuh tempo dalam waktu dekat. Mohon segera lakukan pembayaran agar terhindar dari denda 1%/hari. Terima kasih.';
+  });
+  $('#bc-tpl-info').addEventListener('click', () => { $('#bc-msg').value = 'Info Pinjaman Teman: '; $('#bc-msg').focus(); });
+  $('#bc-send').addEventListener('click', async () => {
+    const mode = document.querySelector('input[name="bc-mode"]:checked').value;
+    const message = $('#bc-msg').value.trim();
+    if (message.length < 3) return toast('Pesan terlalu pendek.', true);
+    const phones = [...document.querySelectorAll('.bc-chk:checked')].map((c) => c.value);
+    if (mode === 'selected' && !phones.length) return toast('Pilih minimal satu user.', true);
+    if (!confirm('Kirim broadcast ini?')) return;
+    try {
+      const r = await api('/api/broadcast', 'POST', { mode, phones, message });
+      toast(`Broadcast terkirim (${r.sent} notifikasi).`);
+      go('broadcast');
+    } catch (e) { toast(e.message, true); }
+  });
+}
+
 const VIEWS = {
   login: vLogin, register: vRegister,
-  bDash: vBDash, ajukan: vAjukan, bayar: vBayar, riwayat: vRiwayat, akun: vAkun,
-  aDash: vADash, pengajuan: vPengajuan, klaim: vKlaim, peminjam: vPeminjam, verifikasi: vVerifikasi, pengaturan: vPengaturan,
+  bDash: vBDash, ajukan: vAjukan, bayar: vBayar, riwayat: vRiwayat, akun: vAkun, notif: vNotif,
+  aDash: vADash, pengajuan: vPengajuan, klaim: vKlaim, peminjam: vPeminjam, verifikasi: vVerifikasi, broadcast: vBroadcast, pengaturan: vPengaturan,
 };
 
 $('#btnLogout').addEventListener('click', logout);
+$('#btnNotif').addEventListener('click', () => go('notif'));
 $('#footVer').textContent = 'Pinjaman Teman v' + APP_VERSION;
 $('#footYear').textContent = new Date().getFullYear();
 

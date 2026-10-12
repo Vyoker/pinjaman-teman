@@ -324,3 +324,12 @@ details.sim summary { cursor: pointer; font-weight: 700; font-size: 14px; color:
   border-radius: 10px; padding: 8px 12px; font-weight: 600; margin-bottom: 6px;
   word-break: break-word;
 }
+
+/* ============ v1.4: notifikasi ============ */
+.notif-badge {
+  position: absolute; top: -2px; right: -4px; min-width: 18px; height: 18px;
+  padding: 0 5px; border-radius: 9px; background: var(--danger); color: #fff;
+  font-size: 10.5px; font-weight: 800; line-height: 18px; text-align: center;
+  box-shadow: 0 0 0 2px #0c1411;
+}
+.notif-unread { border-color: rgba(232,194,106,.45) !important; }
