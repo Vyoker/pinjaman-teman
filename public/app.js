@@ -1,7 +1,7 @@
 'use strict';
 /* Pinjaman Teman — SPA frontend (Bootstrap 5 + animasi) */
 
-const APP_VERSION = '1.4.1';
+const APP_VERSION = '1.5.0';
 const $ = (s) => document.querySelector(s);
 /** Pasang handler ke semua elemen yang cocok (pengganti pola querySelectorAll berulang). */
 const bindAll = (sel, ev, fn) => document.querySelectorAll(sel).forEach((el) => el.addEventListener(ev, fn));
@@ -408,6 +408,7 @@ async function vBayar() {
     const total = m === 'qris' ? Math.round(base * 1.01) : base;
     $('#info-' + key).innerHTML = `<div class="pay-info">
       <div><i class="bi bi-arrow-right-circle me-1"></i>${dest[m]}</div>
+      ${m === 'qris' ? '<img src="/qris.jpg" class="qris-img" alt="QRIS">' : ''}
       ${(s.lateFee || 0) > 0 ? `<div class="muted">Tagihan ${fmtRp(s.amount)} + denda telat ${fmtRp(s.lateFee)} (${s.daysLate} hari × 1%)</div>` : ''}
       <div class="total">Total bayar: ${fmtRp(total)}${m === 'qris' ? ' <span class="muted">(termasuk MDR 1%)</span>' : ''}</div>
       <div class="muted mt-1">Transfer dulu ke tujuan di atas, lalu tekan "Lapor Sudah Bayar".</div>
@@ -505,16 +506,23 @@ async function vPengajuan() {
     </div>`).join('') || `<div class="card anim-in"><p class="muted mb-0"><i class="bi bi-inbox me-2"></i>Tidak ada pengajuan menunggu.</p></div>`);
   const secBerjalan = '<div class="section-title">Pinjaman berjalan</div>' + (running.map((l, i) => {
     const paid = l.schedule.filter((s) => s.status === 'lunas').length;
+    const paidSum = l.schedule.filter((s) => s.status === 'lunas').reduce((a, s) => a + s.amount + (s.lateFeePaid || 0), 0);
     const canCancel = l.schedule.every((s) => s.status === 'belum');
     return `
     <div${stagger(i, 'card')}>
       <div class="d-flex justify-content-between align-items-center mb-2">
-        <div><strong>${esc(l.borrowerName)}</strong><div class="muted">${l.id} &middot; ${fmtRp(l.total)} &middot; ${paid}/${l.schedule.length} terbayar</div></div>
+        <div><strong>${esc(l.borrowerName)}</strong><div class="muted">${l.id} &middot; ${paid}/${l.schedule.length} terbayar</div></div>
         ${badge(l.status)}
       </div>
+      <div class="kv"><span class="k">Pokok</span><span class="v">${fmtRp(l.pokok)}</span></div>
+      <div class="kv"><span class="k">Tenor</span><span class="v">${l.tenorHari} hari &middot; ${l.metode === 'cicilan' ? 'Cicilan ' + l.nCicilan + 'x' : 'Sekaligus'}</span></div>
+      <div class="kv"><span class="k">Bunga (0,2%/hari)</span><span class="v">${fmtRp(l.bunga)}</span></div>
+      <div class="kv"><span class="k">Biaya layanan</span><span class="v">${fmtRp(l.biayaLayanan)}</span></div>
+      <div class="kv"><span class="k">Total tagihan</span><span class="v" style="color:var(--gold)">${fmtRp(l.total)}</span></div>
+      <div class="kv"><span class="k">Sudah dibayar</span><span class="v">${fmtRp(paidSum)}</span></div>
       ${canCancel
-        ? `<button class="btn btn-outline-danger btn-sm w-100" data-cancel="${l.id}"><i class="bi bi-x-circle me-1"></i>Batalkan Pinjaman</button>`
-        : `<p class="muted mb-0" style="font-size:12px"><i class="bi bi-lock-fill me-1"></i>Tidak bisa dibatalkan: sudah ada pembayaran.</p>`}
+        ? `<button class="btn btn-outline-danger btn-sm w-100 mt-2" data-cancel="${l.id}"><i class="bi bi-x-circle me-1"></i>Batalkan Pinjaman</button>`
+        : `<p class="muted mb-0 mt-2" style="font-size:12px"><i class="bi bi-lock-fill me-1"></i>Tidak bisa dibatalkan: sudah ada pembayaran.</p>`}
     </div>`;
   }).join('') || `<div class="card anim-in"><p class="muted mb-0"><i class="bi bi-inbox me-2"></i>Tidak ada pinjaman berjalan.</p></div>`);
   main.innerHTML = secPengajuan + secBerjalan;
@@ -751,7 +759,25 @@ async function vAkun() {
           <i class="bi bi-send-fill me-1"></i>${cur.status === 'belum' ? 'Kirim' : 'Kirim Ulang'}
         </button>
       </div>`;
-    }).join('')}`;
+    }).join('')}
+    <div${stagger(99, 'card')} style="border-color:rgba(248,113,113,.35)">
+      <h3 class="mb-1" style="color:var(--danger)"><i class="bi bi-trash-fill me-2"></i>Hapus Akun</h3>
+      <p class="muted">Akun dan seluruh data diri terhapus permanen. Tidak bisa dilakukan selama masih ada tagihan berjalan.</p>
+      <label class="form-label">Kata sandi untuk konfirmasi</label>
+      <input id="del-pass" type="password" class="form-control" placeholder="Kata sandi kamu" autocomplete="current-password">
+      <button class="btn btn-danger btn-sm mt-2" id="del-acc"><i class="bi bi-trash-fill me-1"></i>Hapus Akun Saya</button>
+    </div>`;
+
+  $('#del-acc').addEventListener('click', async () => {
+    const password = $('#del-pass').value;
+    if (!password) return toast('Isi kata sandi dulu.', true);
+    if (!confirm('Hapus akun permanen? Tindakan ini tidak bisa dibatalkan.')) return;
+    try {
+      await api('/api/account-delete', 'POST', { password });
+      toast('Akun dihapus. Sampai jumpa.');
+      logout();
+    } catch (e) { toast(e.message, true); }
+  });
 
   $('#pc-metode').addEventListener('change', (e) => {
     $('#pc-bank-wrap').classList.toggle('hidden', e.target.value !== 'bank');

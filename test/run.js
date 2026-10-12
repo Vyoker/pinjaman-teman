@@ -351,6 +351,27 @@ function ok(cond, label) {
   r = await call('../api/notifications', { method: 'GET', headers: auth(tA) });
   ok(r.json.ok && r.json.history.length === 2, 'riwayat broadcast 2 entri');
 
+  console.log('== Tes e2e hapus akun mandiri ==');
+  // Dodi masih punya pinjaman berjalan -> hapus ditolak
+  r = await call('../api/account-delete', { method: 'POST', headers: authD, body: { password: 'dodi1234' } });
+  ok(r.status === 400 && /tagihan berjalan/i.test(r.json.error), 'hapus akun terhalang tagihan berjalan');
+  // admin tidak memakai endpoint ini
+  r = await call('../api/account-delete', { method: 'POST', headers: auth(tA), body: { password: 'x' } });
+  ok(r.status === 403, 'admin ditolak di hapus akun mandiri');
+  // lunasi pinjaman Dodi dulu
+  r = await call('../api/payments', { method: 'POST', headers: authD, body: { action: 'claim', loanId: loanD, schedIdx: 0, payMethod: 'dana' } });
+  const cD = r.json.claim.id;
+  r = await call('../api/payments', { method: 'POST', headers: auth(tA), body: { action: 'confirm', claimId: cD, approve: true } });
+  assert.ok(r.json.ok && r.json.loan.status === 'lunas', 'pinjaman Dodi lunas');
+  // password salah -> 401
+  r = await call('../api/account-delete', { method: 'POST', headers: authD, body: { password: 'salah' } });
+  ok(r.status === 401, 'hapus akun password salah -> 401');
+  // password benar -> terhapus, sesi hangus
+  r = await call('../api/account-delete', { method: 'POST', headers: authD, body: { password: 'dodi1234' } });
+  ok(r.json.ok, 'akun Dodi terhapus mandiri');
+  r = await call('../api/me', { method: 'GET', headers: authD });
+  ok(r.status === 401, 'sesi Dodi hangus setelah hapus akun');
+
   console.log(`\nSEMUA TES LOLOS (${n} asersi)`);
 })().catch((e) => {
   console.error('\nTES GAGAL:', e.message);

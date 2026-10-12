@@ -42,6 +42,12 @@ Total tagihan = Pokok + (Pokok x 0,2% x tenor hari) + Rp 2.000 (biaya layanan)
   ke semua user atau user terpilih (menu Broadcast, ada template jatuh
   tempo & info). Peminjam melihatnya via ikon bel dengan lencana jumlah
   belum dibaca.
+- **v1.5**: QRIS resmi terpasang sebagai gambar yang bisa di-scan di layar
+  bayar (`public/qris.jpg`); kartu pinjaman berjalan di menu Pengajuan
+  menampilkan rincian pokok, tenor, bunga, biaya layanan, total, dan
+  sudah dibayar; peminjam bisa menghapus akunnya sendiri di menu Akun
+  (konfirmasi kata sandi) selama tidak ada tagihan berjalan. Satu peminjam
+  tetap hanya boleh punya 1 pinjaman aktif.
 
 ## Arsitektur
 
