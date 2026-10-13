@@ -333,6 +333,8 @@ details.sim summary { cursor: pointer; font-weight: 700; font-size: 14px; color:
   box-shadow: 0 0 0 2px #0c1411;
 }
 .notif-unread { border-color: rgba(232,194,106,.45) !important; }
+/* v1.6: thumbnail bukti transfer */
+.proof-thumb { max-width: 140px; max-height: 140px; border-radius: 10px; border: 1px solid #ffffff22; cursor: zoom-in; object-fit: cover; }
 
 /* ============ v1.5: gambar QRIS ============ */
 .qris-img {

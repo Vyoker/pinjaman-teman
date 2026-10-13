@@ -1,8 +1,9 @@
 'use strict';
 // /api/payments
 //   GET  -> daftar klaim pembayaran (peminjam: milik sendiri; admin: semua, ?status=menunggu)
-//   POST { action:'claim', loanId, schedIdx, payMethod } (peminjam) -> lapor bayar
-//        (nominal klaim = tagihan + denda telat s.d. tanggal lapor; MDR QRIS di atasnya)
+//   POST { action:'claim', loanId, schedIdx, payMethod, proof } (peminjam) -> lapor bayar
+//        (nominal klaim = tagihan + denda telat s.d. tanggal lapor; MDR QRIS di atasnya;
+//         proof = dataURL foto bukti transfer, WAJIB sejak v1.6)
 //   POST { action:'confirm', claimId, approve } (admin) -> konfirmasi/tolak klaim
 const { getJSON, setJSON, nextId, ensureStats } = require('../lib/store');
 const { requireAuth, readBody, send } = require('../lib/auth');
@@ -57,6 +58,14 @@ module.exports = requireAuth(async (req, res) => {
       if (!['dana', 'shopeepay', 'qris'].includes(payMethod)) {
         return send(res, 400, { ok: false, error: 'Metode bayar tidak valid.' });
       }
+      // Bukti transfer foto WAJIB (v1.6) — dataURL JPEG hasil kompresi di HP
+      const proof = body.proof;
+      if (typeof proof !== 'string' || !/^data:image\/(jpeg|png|webp);base64,/.test(proof)) {
+        return send(res, 400, { ok: false, error: 'Foto bukti transfer wajib dilampirkan.' });
+      }
+      if (proof.length > 700000) {
+        return send(res, 400, { ok: false, error: 'Foto bukti terlalu besar (maks ±700KB).' });
+      }
       // Denda dihitung sampai tanggal lapor bayar
       const today = todayStr();
       const { daysLate, lateFee } = calcLateFee(item.amount, item.dueDate, today);
@@ -67,7 +76,7 @@ module.exports = requireAuth(async (req, res) => {
         id, loanId: loan.id, schedIdx: Number(schedIdx),
         borrowerPhone: sess.phone, borrowerName: loan.borrowerName,
         baseAmount: item.amount, lateFee, daysLate,
-        amount, payMethod, status: 'menunggu',
+        amount, payMethod, proof, status: 'menunggu',
         createdAt: new Date().toISOString(), decidedAt: null,
       };
       item.status = 'diklaim';

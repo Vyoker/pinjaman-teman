@@ -31,18 +31,19 @@ module.exports = requireAuth(async (req, res) => {
     if (l.status === 'diajukan') { pendingLoans++; continue; }
     if (l.status !== 'berjalan') continue;
     activeLoans++;
-    for (const s of l.schedule) {
-      if (s.status === 'lunas') continue;
+    l.schedule.forEach((s, schedIdx) => {
+      if (s.status === 'lunas') return;
       const { daysLate, lateFee } = calcLateFee(s.amount, s.dueDate, today);
       outstanding += s.amount + lateFee; // termasuk denda berjalan
       const info = {
         loanId: l.id, borrowerName: l.borrowerName, borrowerPhone: l.borrowerPhone,
-        n: s.n, nCicilan: l.nCicilan, dueDate: s.dueDate, amount: s.amount,
+        n: s.n, nCicilan: l.nCicilan, schedIdx, remindedAt: s.remindedAt || null,
+        dueDate: s.dueDate, amount: s.amount,
         status: s.status, daysLate, lateFee, totalDue: s.amount + lateFee,
       };
       if (s.dueDate < today) late.push(info);
       else if (s.dueDate <= weekAhead) dueThisWeek.push(info);
-    }
+    });
   }
 
   let pendingBorrowers = 0;

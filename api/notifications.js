@@ -6,8 +6,12 @@
 // Admin (gabungan broadcast.js sejak v1.4.1 — hemat jatah function Vercel Hobby):
 //   GET  -> riwayat broadcast terakhir
 //   POST { mode:'all' } | { mode:'selected', phones:[...] } + { message } -> kirim broadcast
+//   POST { action:'remind', loanId, schedIdx } -> pengingat jatuh tempo 1-klik (v1.6)
 const { getJSON, setJSON, nextId } = require('../lib/store');
 const { requireAuth, readBody, send, normPhone } = require('../lib/auth');
+const { calcLateFee, todayStr } = require('../lib/calc');
+
+function fmtRp(n) { return 'Rp ' + Number(n || 0).toLocaleString('id-ID'); }
 
 async function listFor(user) {
   const ids = (await getJSON('idx:notifs')) || [];
@@ -41,6 +45,46 @@ async function broadcast(req, res) {
   if (req.method !== 'POST') return send(res, 405, { ok: false, error: 'Method tidak didukung.' });
 
   const body = await readBody(req);
+
+  // --- Pengingat jatuh tempo 1-klik (v1.6, admin) ---
+  if (body.action === 'remind') {
+    const loan = await getJSON('loan:' + String(body.loanId || ''));
+    if (!loan) return send(res, 404, { ok: false, error: 'Pinjaman tidak ditemukan.' });
+    if (loan.status !== 'berjalan') return send(res, 400, { ok: false, error: 'Pinjaman tidak aktif.' });
+    const s = loan.schedule[Number(body.schedIdx)];
+    if (!s) return send(res, 400, { ok: false, error: 'Tagihan tidak valid.' });
+    if (s.status === 'lunas') return send(res, 400, { ok: false, error: 'Tagihan sudah lunas.' });
+    const today = todayStr();
+    const diffHari = Math.ceil(
+      (new Date(s.dueDate + 'T00:00:00Z') - new Date(today + 'T00:00:00Z')) / 864e5);
+    if (diffHari > 3) {
+      return send(res, 400, { ok: false, error: `Belum perlu diingatkan (jatuh tempo masih ${diffHari} hari lagi).` });
+    }
+    const last = s.remindedAt ? Date.now() - new Date(s.remindedAt).getTime() : Infinity;
+    if (last < 24 * 3600e3) {
+      const jam = Math.max(1, Math.floor(last / 3600e3));
+      return send(res, 400, { ok: false, error: `Sudah diingatkan ${jam} jam lalu. Coba lagi besok.` });
+    }
+    const { daysLate, lateFee } = calcLateFee(s.amount, s.dueDate, today);
+    const total = s.amount + lateFee;
+    const judul = loan.metode === 'cicilan' ? `Cicilan ${s.n}/${loan.nCicilan}` : 'Pelunasan';
+    const message = daysLate > 0
+      ? `Pengingat dari admin: ${judul} ${fmtRp(s.amount)} sudah TELAT ${daysLate} hari (jatuh tempo ${s.dueDate}). Total saat ini ${fmtRp(total)} termasuk denda ${fmtRp(lateFee)}. Segera bayar agar denda tidak bertambah.`
+      : `Pengingat dari admin: ${judul} ${fmtRp(total)} jatuh tempo ${s.dueDate}${diffHari === 0 ? ' (hari ini)' : ` (${diffHari} hari lagi)`}. Segera lakukan pembayaran agar terhindar dari denda 1%/hari.`;
+    s.remindedAt = new Date().toISOString();
+    await setJSON('loan:' + loan.id, loan);
+    const id = await nextId('notif');
+    const rec = {
+      id, to: loan.borrowerPhone, targetName: loan.borrowerName,
+      message, createdAt: new Date().toISOString(), kind: 'remind',
+    };
+    await setJSON('notif:' + id, rec);
+    const ids = (await getJSON('idx:notifs')) || [];
+    ids.push(id);
+    await setJSON('idx:notifs', ids);
+    return send(res, 200, { ok: true, sent: 1, to: loan.borrowerName, message });
+  }
+
   const message = String(body.message || '').trim();
   if (message.length < 3 || message.length > 500) {
     return send(res, 400, { ok: false, error: 'Pesan harus 3–500 karakter.' });
@@ -87,6 +131,10 @@ module.exports = requireAuth(async (req, res) => {
   }
   if (req.method === 'POST') {
     const body = await readBody(req);
+    // Pengingat jatuh tempo hanya untuk admin (v1.6)
+    if (body.action === 'remind') {
+      return send(res, 403, { ok: false, error: 'Khusus admin.' });
+    }
     // Percobaan broadcast oleh peminjam -> tolak seperti endpoint admin lama
     if (body.mode !== undefined || body.message !== undefined) {
       return send(res, 403, { ok: false, error: 'Khusus admin.' });

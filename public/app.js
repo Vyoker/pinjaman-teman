@@ -1,7 +1,7 @@
 'use strict';
 /* Pinjaman Teman — SPA frontend (Bootstrap 5 + animasi) */
 
-const APP_VERSION = '1.5.1';
+const APP_VERSION = '1.6.0';
 const $ = (s) => document.querySelector(s);
 /** Pasang handler ke semua elemen yang cocok (pengganti pola querySelectorAll berulang). */
 const bindAll = (sel, ev, fn) => document.querySelectorAll(sel).forEach((el) => el.addEventListener(ev, fn));
@@ -237,6 +237,33 @@ function loanCard(l, showSchedule, i) {
     </div>`;
 }
 
+/** Banner pengingat tagihan di dashboard peminjam (v1.6): muncul bila ada tagihan
+ *  yang sudah telat atau jatuh tempo <= 3 hari lagi. */
+function dueBanner(active) {
+  if (!active || active.status !== 'berjalan' || !Array.isArray(active.schedule)) return '';
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const items = [];
+  active.schedule.forEach((s) => {
+    if (s.status === 'lunas') return;
+    const diff = Math.ceil((new Date(s.dueDate + 'T00:00:00Z') - new Date(todayIso + 'T00:00:00Z')) / 864e5);
+    if (diff <= 3) items.push({ s, diff });
+  });
+  if (!items.length) return '';
+  const label = ({ s, diff }) => {
+    const nama = active.metode === 'cicilan' ? `Cicilan ${s.n}/${active.nCicilan}` : 'Pelunasan';
+    if (diff > 0) return `${nama} — jatuh tempo ${diff} hari lagi (${fmtDate(s.dueDate)})`;
+    if (diff === 0) return `${nama} — jatuh tempo HARI INI`;
+    return `${nama} — TELAT ${-diff} hari (denda ${fmtRp(s.lateFee || 0)})`;
+  };
+  return `
+    <div${stagger(1, 'card')} style="border-color:rgba(239,68,68,.5)">
+      <h3 class="mb-2"><i class="bi bi-alarm-fill me-2" style="color:var(--danger)"></i>Pengingat Tagihan</h3>
+      ${items.map((x) => `
+        <div class="kv"><span class="k">${label(x)}</span><span class="v">${fmtRp(x.s.totalDue ?? x.s.amount)}</span></div>`).join('')}
+      <button class="btn btn-primary btn-sm w-100 mt-2" id="b-bayar-cepat"><i class="bi bi-wallet2 me-1"></i>Bayar Sekarang</button>
+    </div>`;
+}
+
 async function vBDash() {
   const me = await api('/api/me');
   S.name = me.name; S.phone = me.phone;
@@ -269,6 +296,7 @@ async function vBDash() {
         : `<div class="muted" style="font-size:12px">Mau limit lebih besar? <a href="#" id="b-lengkapi" style="color:var(--gold)">Lengkapi data diri</a></div>`}
       ${active ? '' : '<button class="btn btn-primary w-100 mt-3" id="b-ajukan"><i class="bi bi-plus-circle-fill me-2"></i>Ajukan Pinjaman</button>'}
     </div>
+    ${dueBanner(active)}
     ${rankCard}
     <div class="section-title">Pinjaman berjalan</div>
     ${active ? loanCard(active, true, 2) : `<div${stagger(2, 'card')}><p class="muted mb-0"><i class="bi bi-inbox me-2"></i>Tidak ada pinjaman aktif.</p></div>`}
@@ -276,6 +304,8 @@ async function vBDash() {
     ${hist.map((l, i) => loanCard(l, false, i + 3)).join('') || `<div class="card anim-in"><p class="muted mb-0">Belum ada riwayat.</p></div>`}`;
   const b = $('#b-ajukan');
   if (b) b.addEventListener('click', () => go('ajukan'));
+  const bc = $('#b-bayar-cepat');
+  if (bc) bc.addEventListener('click', () => go('bayar'));
   const bl = $('#b-lengkapi');
   if (bl) bl.addEventListener('click', (e) => { e.preventDefault(); go('akun'); });
 }
@@ -390,6 +420,9 @@ async function vBayar() {
         <option value="qris">QRIS (+1% MDR)</option>
       </select>
       <div id="info-${key}" class="mt-2"></div>
+      <label class="form-label mt-2">Bukti transfer (foto, wajib)</label>
+      <input id="p-${key}" type="file" accept="image/*" class="form-control">
+      <div id="pv-${key}" class="mt-2"></div>
       <button class="btn btn-primary btn-sm mt-2" data-pay="${key}" data-loan="${l.id}" data-idx="${i}">
         <i class="bi bi-send-fill me-1"></i>Lapor Sudah Bayar
       </button>
@@ -419,17 +452,26 @@ async function vBayar() {
     const key = l.id + '_' + i;
     $('#m-' + key).addEventListener('change', () => updInfo(key, s));
     updInfo(key, s);
+    $('#p-' + key).addEventListener('change', (e) => {
+      const f = e.target.files[0];
+      $('#pv-' + key).innerHTML = f
+        ? `<img src="${URL.createObjectURL(f)}" class="proof-thumb" alt="Preview bukti transfer">` : '';
+    });
   });
   main.querySelectorAll('[data-pay]').forEach((b) => b.addEventListener('click', async () => {
     const key = b.dataset.pay;
     try {
+      const file = $('#p-' + key).files[0];
+      if (!file) { toast('Lampirkan foto bukti transfer dulu.', true); return; }
+      b.disabled = true;
+      const proof = await compressImage(file);
       await api('/api/payments', 'POST', {
         action: 'claim', loanId: b.dataset.loan,
-        schedIdx: Number(b.dataset.idx), payMethod: $('#m-' + key).value,
+        schedIdx: Number(b.dataset.idx), payMethod: $('#m-' + key).value, proof,
       });
       toast('Laporan bayar terkirim. Menunggu konfirmasi admin.');
       go('bayar');
-    } catch (e) { toast(e.message, true); }
+    } catch (e) { toast(e.message, true); b.disabled = false; }
   }));
 }
 
@@ -442,21 +484,34 @@ async function vRiwayat() {
       <div${stagger(i, 'card')}><div class="d-flex justify-content-between align-items-center">
         <div><strong>${fmtRp(c.amount)}</strong> <span class="muted">${esc(c.payMethod.toUpperCase())}</span>
         <div class="muted">${fmtDate(c.createdAt)}</div></div>${badge(c.status)}</div>
+        ${c.proof ? `<img src="${c.proof}" class="proof-thumb mt-2" data-proofidx="${i}" alt="Bukti transfer" title="Klik untuk perbesar">` : ''}
       </div>`).join('') || `<div class="card anim-in"><p class="muted mb-0">Belum ada pembayaran.</p></div>`}
     <div class="section-title">Riwayat pinjaman</div>
     ${loans.map((l, i) => loanCard(l, false, i)).join('') || `<div class="card anim-in"><p class="muted mb-0">Belum ada pinjaman.</p></div>`}`;
+  main.querySelectorAll('[data-proofidx]').forEach((im) => im.addEventListener('click', () => {
+    const c = claims[Number(im.dataset.proofidx)];
+    if (c && c.proof) showProof(c.proof);
+  }));
 }
 
 /* ============ ADMIN ============ */
 
 async function vADash() {
   const st = await api('/api/admin-stats');
-  const row = (x, i) => `
+  const hoursSince = (iso) => (iso ? (Date.now() - new Date(iso).getTime()) / 3600e3 : Infinity);
+  const row = (x, i) => {
+    const hrs = hoursSince(x.remindedAt);
+    const remind = hrs < 24
+      ? `<span class="muted" style="font-size:12px"><i class="bi bi-check-circle-fill me-1"></i>Diingatkan ${Math.max(1, Math.floor(hrs))} jam lalu</span>`
+      : `<button class="btn btn-outline-warning btn-sm mt-2" data-remind="${x.loanId}:${x.schedIdx}"><i class="bi bi-bell-fill me-1"></i>Ingatkan</button>`;
+    return `
     <div${stagger(i, 'card')}><div class="d-flex justify-content-between align-items-center">
       <div><strong>${esc(x.borrowerName)}</strong>
       <div class="muted">${x.loanId}${x.n ? ` &middot; Cicilan ${x.n}/${x.nCicilan}` : ''} &middot; jatuh tempo ${fmtDate(x.dueDate)}${(x.daysLate || 0) > 0 ? ` &middot; <span style="color:var(--danger);font-weight:700">telat ${x.daysLate} hari</span>` : ''}</div></div>
       <div class="text-end"><strong style="color:var(--gold)">${fmtRp(x.totalDue ?? x.amount)}</strong>
-      ${(x.lateFee || 0) > 0 ? `<div class="muted" style="font-size:11px">termasuk denda ${fmtRp(x.lateFee)}</div>` : ''}</div></div></div>`;
+      ${(x.lateFee || 0) > 0 ? `<div class="muted" style="font-size:11px">termasuk denda ${fmtRp(x.lateFee)}</div>` : ''}</div></div>
+      <div class="mt-1">${remind}</div></div>`;
+  };
   const stats = [
     ['Total outstanding', st.outstanding, 'rp', false],
     ['Pinjaman berjalan', st.activeLoans, 'num', false],
@@ -476,6 +531,15 @@ async function vADash() {
     ${st.late.length ? `<div class="section-title text-danger">Telat bayar</div>${st.late.map((x, i) => row(x, i)).join('')}` : ''}
     <div class="section-title">Jatuh tempo 7 hari ke depan</div>
     ${st.dueThisWeek.map((x, i) => row(x, i)).join('') || `<div class="card anim-in"><p class="muted mb-0"><i class="bi bi-calendar-check me-2"></i>Tidak ada.</p></div>`}`;
+  main.querySelectorAll('[data-remind]').forEach((b) => b.addEventListener('click', async () => {
+    const [loanId, schedIdx] = b.dataset.remind.split(':');
+    b.disabled = true;
+    try {
+      await api('/api/notifications', 'POST', { action: 'remind', loanId, schedIdx: Number(schedIdx) });
+      toast('Pengingat terkirim ke peminjam.');
+      go('aDash');
+    } catch (e) { toast(e.message, true); b.disabled = false; }
+  }));
 }
 
 async function vPengajuan() {
@@ -591,11 +655,18 @@ async function vKlaim() {
         <div class="muted">${c.loanId} &middot; via ${esc(c.payMethod.toUpperCase())} &middot; ${fmtDate(c.createdAt)}</div>
         ${(c.lateFee || 0) > 0 ? `<div class="muted" style="color:var(--danger)">Tagihan ${fmtRp(c.baseAmount)} + denda ${fmtRp(c.lateFee)} (${c.daysLate} hari telat)</div>` : ''}
       </div><strong class="fs-5" style="color:var(--gold)">${fmtRp(c.amount)}</strong></div>
-      <div class="d-flex gap-2">
+      ${c.proof
+        ? `<button class="btn btn-outline-light btn-sm w-100 mt-2" data-proof="${c.id}"><i class="bi bi-image me-1"></i>Lihat Bukti Transfer</button>`
+        : `<p class="muted mb-0 mt-2" style="font-size:12px"><i class="bi bi-info-circle me-1"></i>Tanpa foto bukti (laporan versi lama).</p>`}
+      <div class="d-flex gap-2 mt-2">
         <button class="btn btn-primary btn-sm flex-fill" data-ok="${c.id}"><i class="bi bi-check-lg me-1"></i>Terima</button>
         <button class="btn btn-danger btn-sm flex-fill" data-no="${c.id}"><i class="bi bi-x-lg me-1"></i>Tolak</button>
       </div>
     </div>`).join('');
+  main.querySelectorAll('[data-proof]').forEach((b) => b.addEventListener('click', () => {
+    const c = claims.find((x) => x.id === b.dataset.proof);
+    if (c && c.proof) showProof(c.proof);
+  }));
   main.querySelectorAll('[data-ok]').forEach((b) => b.addEventListener('click', async () => {
     try {
       await api('/api/payments', 'POST', { action: 'confirm', claimId: b.dataset.ok, approve: true });
@@ -714,6 +785,28 @@ function compressImage(file) {
     img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Foto tidak terbaca.')); };
     img.src = url;
   });
+}
+
+/** Tampilkan foto bukti transfer dalam modal perbesar (v1.6). */
+function showProof(src) {
+  let m = $('#proofModal');
+  if (!m) {
+    document.body.insertAdjacentHTML('beforeend', `
+      <div class="modal fade" id="proofModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+          <div class="modal-content" style="background:#101a14;border:1px solid #e8c26a55">
+            <div class="modal-header" style="border-color:#ffffff18">
+              <h5 class="modal-title mb-0"><i class="bi bi-image me-2"></i>Bukti Transfer</h5>
+              <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Tutup"></button>
+            </div>
+            <div class="modal-body text-center"><img id="proofModalImg" class="img-fluid rounded" alt="Bukti transfer"></div>
+          </div>
+        </div>
+      </div>`);
+    m = $('#proofModal');
+  }
+  $('#proofModalImg').src = src;
+  bootstrap.Modal.getOrCreateInstance(m).show();
 }
 
 const PF_STATUS = {
