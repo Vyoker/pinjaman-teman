@@ -5,7 +5,7 @@
 //        (syarat: belum ada pembayaran sama sekali)
 const { getJSON, setJSON, ensureStats } = require('../lib/store');
 const { requireAuth, readBody, send } = require('../lib/auth');
-const { calcLoan, MIN_TENOR, MAX_TENOR } = require('../lib/calc');
+const { calcLoan, MIN_TENOR, maxTenorFor } = require('../lib/calc');
 const { isPencairanComplete } = require('../lib/profile');
 
 const DAY = 864e5;
@@ -22,10 +22,11 @@ async function decide(res, loan, body) {
     return send(res, 400, { ok: false, error: 'Peminjam belum mengisi data pencairan (Dana/ShopeePay/ATM).' });
   }
   const tn = body.tenorHari === undefined || body.tenorHari === null ? loan.tenorProposal : Number(body.tenorHari);
-  if (!Number.isInteger(tn) || tn < MIN_TENOR || tn > MAX_TENOR) {
-    return send(res, 400, { ok: false, error: `Tenor harus ${MIN_TENOR}-${MAX_TENOR} hari.` });
+  const maxTenor = maxTenorFor((borrower && borrower.stats && borrower.stats.payments) || 0);
+  if (!Number.isInteger(tn) || tn < MIN_TENOR || tn > maxTenor) {
+    return send(res, 400, { ok: false, error: `Tenor harus ${MIN_TENOR}-${maxTenor} hari (maks rank peminjam).` });
   }
-  const sim = calcLoan(loan.pokok, tn, loan.metode);
+  const sim = calcLoan(loan.pokok, tn, loan.metode, maxTenor);
   const now = Date.now();
   loan.tenorHari = tn;
   loan.nCicilan = sim.nCicilan;

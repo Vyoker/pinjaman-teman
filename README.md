@@ -52,6 +52,13 @@ Total tagihan = Pokok + (Pokok x 0,2% x tenor hari) + Rp 2.000 (biaya layanan)
   seperti slider tenor — batas maksimalnya = limit + bonus limit, jadi
   peminjam tidak bisa menggeser melebihi limit. Server tetap memvalidasi
   ulang batas limit saat pengajuan dikirim.
+- **v1.8**: rank memberi manfaat nyata — bonus limit permanen per rank
+  (Bronze +10rb, Silver +15rb, Gold +20rb, Platinum +25rb, Diamond +50rb)
+  yang menambah limit efektif; Platinum membuka tenor hingga 45 hari dan
+  Diamond hingga 60 hari (rank lain tetap maks 30 hari). Slider tenor di
+  menu Ajukan, validasi pengajuan, simulasi, dan persetujuan admin semuanya
+  mengikuti batas tenor rank peminjam; kartu Rank menampilkan bonus dan
+  tenor maksimum rank saat ini serta hadiah rank berikutnya.
 
 ## Arsitektur
 

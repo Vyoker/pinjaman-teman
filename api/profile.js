@@ -5,16 +5,19 @@
 const { getJSON, setJSON } = require('../lib/store');
 const { requireAuth, readBody, send, normPhone } = require('../lib/auth');
 const { FIELD_MAP, ensureProfile, validateField, validatePencairan, limitBonus, maxBonus, effectiveLimit } = require('../lib/profile');
+const { rankBonusFor } = require('../lib/calc');
 
 function shape(user) {
   const profile = ensureProfile(user);
   const bonus = limitBonus(profile);
+  const rankBonus = rankBonusFor((user.stats && user.stats.payments) || 0);
   return {
     ok: true,
     name: user.name,
     phone: user.phone,
     limit: user.limit || 0,
     bonus,
+    rankBonus,
     maxBonus: maxBonus(),
     effectiveLimit: effectiveLimit(user),
     pencairan: user.pencairan || null,
@@ -74,6 +77,7 @@ module.exports = requireAuth(async (req, res) => {
       return send(res, 200, {
         ok: true, field, status: cur.status,
         bonus: limitBonus(tProfile), effectiveLimit: effectiveLimit(target),
+        rankBonus: rankBonusFor((target.stats && target.stats.payments) || 0),
       });
     }
     // Peminjam: kirim/ubah satu data

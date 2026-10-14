@@ -2,7 +2,7 @@
 // GET /api/me -> profil sesi berjalan
 const { getJSON, isMemoryMode, ensureStats } = require('../lib/store');
 const { requireAuth, send } = require('../lib/auth');
-const { rankFor } = require('../lib/calc');
+const { rankFor, rankBonusFor, maxTenorFor } = require('../lib/calc');
 const { limitBonus, effectiveLimit } = require('../lib/profile');
 
 module.exports = requireAuth(async (req, res) => {
@@ -15,6 +15,8 @@ module.exports = requireAuth(async (req, res) => {
     const { current, next } = rankFor(stats.payments);
     out.limit = user ? user.limit : 0;
     out.bonusLimit = user ? limitBonus(user.profile) : 0;
+    out.rankBonus = rankBonusFor(stats.payments);
+    out.maxTenor = maxTenorFor(stats.payments);
     out.effectiveLimit = user ? effectiveLimit(user) : 0;
     out.pencairan = user ? user.pencairan || null : null;
     out.status = user ? user.status : 'unknown';

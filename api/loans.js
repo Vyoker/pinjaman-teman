@@ -4,7 +4,7 @@
 //   POST (peminjam) { pokok, tenorHari, metode } -> ajukan pinjaman (status 'diajukan')
 const { getJSON, setJSON, nextId } = require('../lib/store');
 const { requireAuth, readBody, send } = require('../lib/auth');
-const { MIN_TENOR, MAX_TENOR, calcLateFee, todayStr } = require('../lib/calc');
+const { MIN_TENOR, calcLateFee, todayStr, maxTenorFor } = require('../lib/calc');
 const { effectiveLimit } = require('../lib/profile');
 
 async function idxPush(key, val) {
@@ -48,7 +48,15 @@ module.exports = requireAuth(async (req, res) => {
     const url = new URL(req.url, 'http://x');
     const status = url.searchParams.get('status') || '';
     const filter = sess.role === 'admin' ? { status } : { phone: sess.phone, status };
-    return send(res, 200, { ok: true, loans: await listLoans(filter) });
+    const loans = await listLoans(filter);
+    // Admin perlu tahu tenor maksimum tiap peminjam (unlock rank) saat menyetujui
+    if (sess.role === 'admin') {
+      for (const l of loans) {
+        const u = await getJSON('user:' + l.borrowerPhone);
+        l.maxTenor = maxTenorFor((u && u.stats && u.stats.payments) || 0);
+      }
+    }
+    return send(res, 200, { ok: true, loans });
   }
 
   if (req.method === 'POST') {
@@ -58,14 +66,15 @@ module.exports = requireAuth(async (req, res) => {
       const pk = Number(pokok);
       const tn = Number(tenorHari);
       if (!Number.isInteger(pk) || pk <= 0) return send(res, 400, { ok: false, error: 'Pokok tidak valid.' });
-      if (!Number.isInteger(tn) || tn < MIN_TENOR || tn > MAX_TENOR) {
-        return send(res, 400, { ok: false, error: `Tenor harus ${MIN_TENOR}-${MAX_TENOR} hari.` });
-      }
       if (metode !== 'lunas' && metode !== 'cicilan') {
         return send(res, 400, { ok: false, error: 'Metode pelunasan tidak valid.' });
       }
       const user = await getJSON('user:' + sess.phone);
       if (!user || user.status !== 'active') return send(res, 403, { ok: false, error: 'Akun tidak aktif.' });
+      const maxTenor = maxTenorFor((user.stats && user.stats.payments) || 0);
+      if (!Number.isInteger(tn) || tn < MIN_TENOR || tn > maxTenor) {
+        return send(res, 400, { ok: false, error: `Tenor harus ${MIN_TENOR}-${maxTenor} hari.` });
+      }
       if (pk > effectiveLimit(user)) return send(res, 400, { ok: false, error: 'Pokok melebihi limit kamu.' });
       if (await hasActiveLoan(sess.phone)) {
         return send(res, 400, { ok: false, error: 'Masih ada pinjaman aktif. Selesaikan dulu.' });

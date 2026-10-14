@@ -1,7 +1,7 @@
 'use strict';
 /* Pinjaman Teman — SPA frontend (Bootstrap 5 + animasi) */
 
-const APP_VERSION = '1.7.0';
+const APP_VERSION = '1.8.0';
 const $ = (s) => document.querySelector(s);
 /** Pasang handler ke semua elemen yang cocok (pengganti pola querySelectorAll berulang). */
 const bindAll = (sel, ev, fn) => document.querySelectorAll(sel).forEach((el) => el.addEventListener(ev, fn));
@@ -281,8 +281,11 @@ async function vBDash() {
       <div class="kv"><span class="k">Pinjaman lunas</span><span class="v">${stt.loansLunas}x</span></div>
       <div class="kv"><span class="k">Total pernah pinjam</span><span class="v">${fmtRp(stt.totalPinjam)}</span></div>
       ${nx ? `<div class="mt-2"><div class="d-flex justify-content-between"><span class="muted">Menuju ${esc(nx.name)}</span><span class="muted">${stt.payments}/${nx.min} pembayaran</span></div>
-        <div class="progress mt-1" style="height:10px;background:#0e1712"><div class="progress-bar" role="progressbar" style="width:${pct}%;background:linear-gradient(90deg,var(--emerald),${nx.color})"></div></div></div>`
+        <div class="progress mt-1" style="height:10px;background:#0e1712"><div class="progress-bar" role="progressbar" style="width:${pct}%;background:linear-gradient(90deg,var(--emerald),${nx.color})"></div></div>
+        <p class="muted mt-2 mb-0" style="font-size:12px"><i class="bi bi-gift me-1"></i>${esc(nx.name)}: bonus limit ${fmtRp(nx.bonus)}${nx.maxTenor > 30 ? `, tenor hingga ${nx.maxTenor} hari` : ''}</p></div>`
         : (rk ? `<p class="note mt-2"><i class="bi bi-gem me-1"></i>Rank tertinggi tercapai. Pertahankan!</p>` : '')}
+      ${rk ? `<div class="kv mt-2"><span class="k">Bonus limit rank</span><span class="v" style="color:var(--gold)">+${fmtRp(rk.bonus)}</span></div>
+      <div class="kv"><span class="k">Tenor maksimum</span><span class="v">${rk.maxTenor} hari</span></div>` : ''}
       <p class="muted mt-2 mb-0" style="font-size:12px">Denda telat: 1%/hari dari tagihan. Bayar tepat waktu untuk naik rank lebih cepat.</p>
     </div>`;
   main.innerHTML = `
@@ -314,19 +317,20 @@ let simTimer = null;
 async function vAjukan() {
   const me = await api('/api/me');
   const eff = Math.floor(((me.effectiveLimit ?? me.limit) || 0) / 1000) * 1000;
+  const maxT = me.maxTenor || 30;
   const defPokok = eff >= 500000 ? 500000 : Math.max(eff, 1000);
   main.innerHTML = `
     <div${stagger(0, 'card')}>
       <h3><i class="bi bi-plus-circle-fill me-2" style="color:var(--gold)"></i>Ajukan Pinjaman</h3>
-      <div class="kv"><span class="k">Limit kamu</span><span class="v">${fmtRp(me.effectiveLimit ?? me.limit)}${(me.bonusLimit || 0) > 0 ? ` <span class="muted" style="font-size:12px">(termasuk bonus ${fmtRp(me.bonusLimit)})</span>` : ''}</span></div>
+      <div class="kv"><span class="k">Limit kamu</span><span class="v">${fmtRp(me.effectiveLimit ?? me.limit)}${((me.bonusLimit || 0) > 0 || (me.rankBonus || 0) > 0) ? ` <span class="muted" style="font-size:12px">(bonus data ${fmtRp(me.bonusLimit || 0)} + bonus rank ${fmtRp(me.rankBonus || 0)})</span>` : ''}</span></div>
       ${!me.pencairan ? '<p class="note warn"><i class="bi bi-exclamation-triangle-fill me-1"></i>Kamu belum mengisi data pencairan. Isi dulu di menu Akun agar pinjaman bisa dicairkan.</p>' : ''}
       ${eff < 1000
         ? '<p class="note warn"><i class="bi bi-exclamation-triangle-fill me-1"></i>Limit pinjamanmu belum diatur. Hubungi admin untuk mengaktifkan pengajuan.</p>'
         : `<label class="form-label">Jumlah pokok: <strong id="a-pokok-lbl" style="color:var(--gold)">${fmtRp(defPokok)}</strong></label>
       <input id="a-pokok" class="form-range" type="range" min="1000" max="${eff}" step="1000" value="${defPokok}">
       <div class="d-flex justify-content-between mb-1"><span class="muted" style="font-size:12px">Rp 1.000</span><span class="muted" style="font-size:12px">maks ${fmtRp(eff)}</span></div>`}
-      <label class="form-label">Tenor: <strong id="a-tenor-lbl" style="color:var(--gold)">30</strong> hari</label>
-      <input id="a-tenor" class="form-range" type="range" min="15" max="30" value="30">
+      <label class="form-label">Tenor: <strong id="a-tenor-lbl" style="color:var(--gold)">30</strong> hari${maxT > 30 ? ` <span class="muted" style="font-size:12px">(rank ${esc(me.rank && me.rank.name)} membuka hingga ${maxT} hari)</span>` : ''}</label>
+      <input id="a-tenor" class="form-range" type="range" min="15" max="${maxT}" value="30">
       <label class="form-label">Metode pelunasan</label>
       <div class="radio-cards">
         <label><input type="radio" name="a-metode" value="lunas" checked> Sekaligus</label>
@@ -350,7 +354,7 @@ async function vAjukan() {
     $('#a-pokok-lbl').textContent = fmtRp(pokok);
     $('#a-tenor-lbl').textContent = tenor;
     paint(pRange, 1000, eff);
-    paint(tRange, 15, 30);
+    paint(tRange, 15, maxT);
     if (!pokok || pokok <= 0) { $('#a-sim').innerHTML = ''; return; }
     try {
       const s = await api('/api/simulate', 'POST', {
@@ -370,7 +374,7 @@ async function vAjukan() {
         <div class="kv"><span class="k"><i class="bi bi-wallet2 me-1"></i>Dana / ShopeePay</span><span class="v green">${fmtRp(s.totalBayar.dana)}</span></div>
         <div class="kv"><span class="k"><i class="bi bi-qr-code me-1"></i>QRIS (+1% MDR)</span><span class="v">${fmtRp(s.totalBayar.qris)}</span></div>
         ${s.lebihDariLimit ? '<p class="note warn"><i class="bi bi-exclamation-triangle-fill me-1"></i>Pokok melebihi limit kamu.</p>' : ''}
-        <p class="note"><i class="bi bi-info-circle-fill me-1"></i>Tenor final ditentukan admin saat persetujuan (15–30 hari).</p>
+        <p class="note"><i class="bi bi-info-circle-fill me-1"></i>Tenor final ditentukan admin saat persetujuan (15–${s.maxTenor || 30} hari).</p>
         </div>`;
     } catch (e) { $('#a-sim').innerHTML = `<p class="note warn">${esc(e.message)}</p>`; }
   };
@@ -570,8 +574,8 @@ async function vPengajuan() {
       <div class="kv"><span class="k">Metode</span><span class="v">${l.metode === 'cicilan' ? 'Cicilan' : 'Sekaligus'}</span></div>
       <div class="kv"><span class="k">Pencairan</span><span class="v">${pcTxt(l.borrowerPhone)}</span></div>
       <div class="kv"><span class="k">Diajukan</span><span class="v">${fmtDate(l.createdAt)}</span></div>
-      <label class="form-label">Tenor final (15–30 hari)</label>
-      <input type="number" id="t-${l.id}" class="form-control" min="15" max="30" value="${l.tenorProposal}">
+      <label class="form-label">Tenor final (15–${l.maxTenor || 30} hari)</label>
+      <input type="number" id="t-${l.id}" class="form-control" min="15" max="${l.maxTenor || 30}" value="${l.tenorProposal}">
       <div id="sim-${l.id}" class="mt-2"><p class="muted mb-0"><i class="bi bi-hourglass-split me-1"></i>Menghitung rincian…</p></div>
       <div class="d-flex gap-2 mt-3">
         <button class="btn btn-primary btn-sm flex-fill" data-ok="${l.id}"><i class="bi bi-check-lg me-1"></i>Setujui</button>
@@ -606,8 +610,9 @@ async function vPengajuan() {
     const el = $('#sim-' + l.id);
     if (!el) return;
     const tn = Number($('#t-' + l.id).value);
-    if (!Number.isInteger(tn) || tn < 15 || tn > 30) {
-      el.innerHTML = '<p class="note warn mb-0"><i class="bi bi-exclamation-triangle-fill me-1"></i>Tenor harus 15–30 hari.</p>';
+    const mt = l.maxTenor || 30;
+    if (!Number.isInteger(tn) || tn < 15 || tn > mt) {
+      el.innerHTML = `<p class="note warn mb-0"><i class="bi bi-exclamation-triangle-fill me-1"></i>Tenor harus 15–${mt} hari.</p>`;
       return;
     }
     try {

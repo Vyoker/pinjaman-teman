@@ -435,6 +435,66 @@ function ok(cond, label) {
   const lateRow = r.json.late.find((x) => x.loanId === loanE2 && x.schedIdx === 0);
   ok(lateRow && lateRow.remindedAt, 'admin-stats: baris telat memuat schedIdx & remindedAt');
 
+  // ============ v1.8: manfaat rank (bonus limit + unlock tenor) ============
+  // Fajar: Platinum (45 pembayaran)
+  r = await call('../api/auth', { method: 'POST', body: { action: 'register', name: 'Fajar', phone: '081900000005', password: 'fajar123' } });
+  ok(r.json.ok, 'registrasi Fajar');
+  r = await call('../api/borrowers', { method: 'POST', headers: auth(tA), body: { phone: '081900000005', approve: true, limit: 500000 } });
+  ok(r.json.ok, 'admin setujui Fajar, limit 500rb');
+  const tF = (await call('../api/auth', { method: 'POST', body: { action: 'login', phone: '081900000005', password: 'fajar123' } })).json.token;
+  const uF = await getJSON('user:081900000005');
+  uF.stats = { payments: 45, loansLunas: 5, totalPinjam: 2000000 };
+  await setJSON('user:081900000005', uF);
+  // me: bonus rank + max tenor Platinum
+  r = await call('../api/me', { method: 'GET', headers: auth(tF) });
+  ok(r.json.rankBonus === 25000, 'Platinum: rankBonus 25000');
+  ok(r.json.maxTenor === 45, 'Platinum: maxTenor 45');
+  ok(r.json.effectiveLimit === 525000, 'effectiveLimit = 500rb + 25rb bonus rank');
+  ok(r.json.rank && r.json.rank.name === 'Platinum', 'rank Platinum terdeteksi');
+  // apply: pokok di atas limit+bonus rank ditolak
+  r = await call('../api/loans', { method: 'POST', headers: auth(tF), body: { pokok: 526000, tenorHari: 30, metode: 'lunas' } });
+  ok(r.status === 400 && /limit/i.test(r.json.error), 'pokok 526rb > 525rb ditolak');
+  // apply: tenor 46 ditolak, 45 diterima
+  r = await call('../api/loans', { method: 'POST', headers: auth(tF), body: { pokok: 525000, tenorHari: 46, metode: 'lunas' } });
+  ok(r.status === 400 && /Tenor/i.test(r.json.error), 'tenor 46 untuk Platinum ditolak');
+  r = await call('../api/loans', { method: 'POST', headers: auth(tF), body: { pokok: 525000, tenorHari: 45, metode: 'lunas' } });
+  ok(r.json.ok, 'tenor 45 untuk Platinum diterima');
+  const loanF = r.json.loan.id;
+  // simulate mengikuti tenor rank
+  r = await call('../api/simulate', { method: 'POST', headers: auth(tF), body: { pokok: 525000, tenorHari: 45, metode: 'lunas' } });
+  ok(r.json.ok && r.json.maxTenor === 45 && r.json.total === 525000 + 47250 + 2000, 'simulate 45 hari: total 574250');
+  r = await call('../api/simulate', { method: 'POST', headers: auth(tF), body: { pokok: 525000, tenorHari: 46, metode: 'lunas' } });
+  ok(r.status === 400, 'simulate 46 hari untuk Platinum ditolak');
+  // admin approve: 46 ditolak, 45 diterima (butuh pencairan dulu)
+  r = await call('../api/profile', { method: 'POST', headers: auth(tF), body: { action: 'pencairan', metode: 'dana', nomor: '081511112222', atasNama: 'Fajar Nugroho' } });
+  assert.ok(r.json.ok, 'Fajar isi data pencairan');
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId: loanF, approve: true, tenorHari: 46 } });
+  ok(r.status === 400 && /Tenor/i.test(r.json.error), 'admin approve tenor 46 untuk Platinum ditolak');
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId: loanF, approve: true, tenorHari: 45 } });
+  ok(r.json.ok && r.json.loan.tenorHari === 45 && r.json.loan.total === 574250, 'admin approve tenor 45: total 574250');
+  // Gita: Diamond (55 pembayaran)
+  r = await call('../api/auth', { method: 'POST', body: { action: 'register', name: 'Gita', phone: '081900000006', password: 'gita1234' } });
+  ok(r.json.ok, 'registrasi Gita');
+  r = await call('../api/borrowers', { method: 'POST', headers: auth(tA), body: { phone: '081900000006', approve: true, limit: 300000 } });
+  ok(r.json.ok, 'admin setujui Gita, limit 300rb');
+  const tG = (await call('../api/auth', { method: 'POST', body: { action: 'login', phone: '081900000006', password: 'gita1234' } })).json.token;
+  const uG = await getJSON('user:081900000006');
+  uG.stats = { payments: 55, loansLunas: 8, totalPinjam: 3000000 };
+  await setJSON('user:081900000006', uG);
+  r = await call('../api/me', { method: 'GET', headers: auth(tG) });
+  ok(r.json.rankBonus === 50000 && r.json.maxTenor === 60 && r.json.rank.name === 'Diamond', 'Diamond: bonus 50rb, tenor 60');
+  ok(r.json.effectiveLimit === 350000, 'effectiveLimit Gita = 300rb + 50rb');
+  r = await call('../api/loans', { method: 'POST', headers: auth(tG), body: { pokok: 350000, tenorHari: 61, metode: 'lunas' } });
+  ok(r.status === 400, 'tenor 61 untuk Diamond ditolak');
+  r = await call('../api/loans', { method: 'POST', headers: auth(tG), body: { pokok: 350000, tenorHari: 60, metode: 'lunas' } });
+  ok(r.json.ok, 'tenor 60 untuk Diamond diterima');
+  // rank di bawah Platinum tetap maks 30 hari
+  r = await call('../api/loans', { method: 'POST', headers: auth(tB), body: { pokok: 100000, tenorHari: 31, metode: 'lunas' } });
+  ok(r.status === 400 && /Tenor/i.test(r.json.error), 'tenor 31 untuk rank biasa ditolak');
+  // profile memuat rankBonus
+  r = await call('../api/profile', { method: 'GET', headers: auth(tF) });
+  ok(r.json.rankBonus === 25000 && r.json.effectiveLimit === 525000, 'profile: rankBonus & effectiveLimit sinkron');
+
   console.log(`\nSEMUA TES LOLOS (${n} asersi)`);
 })().catch((e) => {
   console.error('\nTES GAGAL:', e.message);
