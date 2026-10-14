@@ -48,6 +48,10 @@ Total tagihan = Pokok + (Pokok x 0,2% x tenor hari) + Rp 2.000 (biaya layanan)
   sudah dibayar; peminjam bisa menghapus akunnya sendiri di menu Akun
   (konfirmasi kata sandi) selama tidak ada tagihan berjalan. Satu peminjam
   tetap hanya boleh punya 1 pinjaman aktif.
+- **v1.7**: input jumlah pokok di menu Ajukan diganti jadi slider (garis)
+  seperti slider tenor — batas maksimalnya = limit + bonus limit, jadi
+  peminjam tidak bisa menggeser melebihi limit. Server tetap memvalidasi
+  ulang batas limit saat pengajuan dikirim.
 
 ## Arsitektur
 

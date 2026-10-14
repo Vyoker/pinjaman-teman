@@ -1,7 +1,7 @@
 'use strict';
 /* Pinjaman Teman — SPA frontend (Bootstrap 5 + animasi) */
 
-const APP_VERSION = '1.6.0';
+const APP_VERSION = '1.7.0';
 const $ = (s) => document.querySelector(s);
 /** Pasang handler ke semua elemen yang cocok (pengganti pola querySelectorAll berulang). */
 const bindAll = (sel, ev, fn) => document.querySelectorAll(sel).forEach((el) => el.addEventListener(ev, fn));
@@ -313,13 +313,18 @@ async function vBDash() {
 let simTimer = null;
 async function vAjukan() {
   const me = await api('/api/me');
+  const eff = Math.floor(((me.effectiveLimit ?? me.limit) || 0) / 1000) * 1000;
+  const defPokok = eff >= 500000 ? 500000 : Math.max(eff, 1000);
   main.innerHTML = `
     <div${stagger(0, 'card')}>
       <h3><i class="bi bi-plus-circle-fill me-2" style="color:var(--gold)"></i>Ajukan Pinjaman</h3>
       <div class="kv"><span class="k">Limit kamu</span><span class="v">${fmtRp(me.effectiveLimit ?? me.limit)}${(me.bonusLimit || 0) > 0 ? ` <span class="muted" style="font-size:12px">(termasuk bonus ${fmtRp(me.bonusLimit)})</span>` : ''}</span></div>
       ${!me.pencairan ? '<p class="note warn"><i class="bi bi-exclamation-triangle-fill me-1"></i>Kamu belum mengisi data pencairan. Isi dulu di menu Akun agar pinjaman bisa dicairkan.</p>' : ''}
-      <label class="form-label">Jumlah pokok (Rp)</label>
-      <input id="a-pokok" class="form-control" type="number" min="1000" step="1000" placeholder="500000">
+      ${eff < 1000
+        ? '<p class="note warn"><i class="bi bi-exclamation-triangle-fill me-1"></i>Limit pinjamanmu belum diatur. Hubungi admin untuk mengaktifkan pengajuan.</p>'
+        : `<label class="form-label">Jumlah pokok: <strong id="a-pokok-lbl" style="color:var(--gold)">${fmtRp(defPokok)}</strong></label>
+      <input id="a-pokok" class="form-range" type="range" min="1000" max="${eff}" step="1000" value="${defPokok}">
+      <div class="d-flex justify-content-between mb-1"><span class="muted" style="font-size:12px">Rp 1.000</span><span class="muted" style="font-size:12px">maks ${fmtRp(eff)}</span></div>`}
       <label class="form-label">Tenor: <strong id="a-tenor-lbl" style="color:var(--gold)">30</strong> hari</label>
       <input id="a-tenor" class="form-range" type="range" min="15" max="30" value="30">
       <label class="form-label">Metode pelunasan</label>
@@ -328,21 +333,24 @@ async function vAjukan() {
         <label><input type="radio" name="a-metode" value="cicilan"> Cicilan</label>
       </div>
       <div id="a-sim"></div>
-      <button class="btn btn-primary w-100 mt-3" id="a-submit"><i class="bi bi-send-fill me-2"></i>Kirim Pengajuan</button>
+      <button class="btn btn-primary w-100 mt-3" id="a-submit" ${eff < 1000 ? 'disabled' : ''}><i class="bi bi-send-fill me-2"></i>Kirim Pengajuan</button>
     </div>`;
 
-  const range = $('#a-tenor');
-  const paintRange = () => {
-    const p = ((range.value - 15) / 15) * 100;
-    range.style.setProperty('--fill', p + '%');
+  const pRange = $('#a-pokok');
+  const tRange = $('#a-tenor');
+  const paint = (el, min, max) => {
+    const p = max > min ? ((el.value - min) / (max - min)) * 100 : 0;
+    el.style.setProperty('--fill', p + '%');
   };
-  paintRange();
 
   const renderSim = async () => {
-    const pokok = Number($('#a-pokok').value);
-    const tenor = Number(range.value);
+    if (!pRange) return;
+    const pokok = Number(pRange.value);
+    const tenor = Number(tRange.value);
+    $('#a-pokok-lbl').textContent = fmtRp(pokok);
     $('#a-tenor-lbl').textContent = tenor;
-    paintRange();
+    paint(pRange, 1000, eff);
+    paint(tRange, 15, 30);
     if (!pokok || pokok <= 0) { $('#a-sim').innerHTML = ''; return; }
     try {
       const s = await api('/api/simulate', 'POST', {
@@ -367,15 +375,16 @@ async function vAjukan() {
     } catch (e) { $('#a-sim').innerHTML = `<p class="note warn">${esc(e.message)}</p>`; }
   };
   const deb = () => { clearTimeout(simTimer); simTimer = setTimeout(renderSim, 450); };
-  $('#a-pokok').addEventListener('input', deb);
-  range.addEventListener('input', deb);
+  if (pRange) pRange.addEventListener('input', deb);
+  tRange.addEventListener('input', deb);
   document.querySelectorAll('input[name="a-metode"]').forEach((r) => r.addEventListener('change', renderSim));
+  if (pRange) renderSim();
 
   $('#a-submit').addEventListener('click', async () => {
     try {
       await api('/api/loans', 'POST', {
         pokok: Number($('#a-pokok').value),
-        tenorHari: Number(range.value),
+        tenorHari: Number(tRange.value),
         metode: document.querySelector('input[name="a-metode"]:checked').value,
       });
       toast('Pengajuan terkirim. Menunggu persetujuan admin.');
