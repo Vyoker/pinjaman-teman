@@ -1,7 +1,7 @@
 'use strict';
 /* Pinjaman Teman — SPA frontend (Bootstrap 5 + animasi) */
 
-const APP_VERSION = '1.8.0';
+const APP_VERSION = '1.9.0';
 const $ = (s) => document.querySelector(s);
 /** Pasang handler ke semua elemen yang cocok (pengganti pola querySelectorAll berulang). */
 const bindAll = (sel, ev, fn) => document.querySelectorAll(sel).forEach((el) => el.addEventListener(ev, fn));
@@ -491,6 +491,14 @@ async function vBayar() {
 async function vRiwayat() {
   const { loans } = await api('/api/loans');
   const { claims } = await api('/api/payments');
+  const tunai = [];
+  for (const l of loans) {
+    for (const s of (l.schedule || [])) {
+      if (s.status === 'lunas' && s.payMethod === 'tunai') {
+        tunai.push({ loan: l, item: s });
+      }
+    }
+  }
   main.innerHTML = `
     <div class="section-title">Riwayat pembayaran</div>
     ${claims.map((c, i) => `
@@ -498,7 +506,12 @@ async function vRiwayat() {
         <div><strong>${fmtRp(c.amount)}</strong> <span class="muted">${esc(c.payMethod.toUpperCase())}</span>
         <div class="muted">${fmtDate(c.createdAt)}</div></div>${badge(c.status)}</div>
         ${c.proof ? `<img src="${c.proof}" class="proof-thumb mt-2" data-proofidx="${i}" alt="Bukti transfer" title="Klik untuk perbesar">` : ''}
-      </div>`).join('') || `<div class="card anim-in"><p class="muted mb-0">Belum ada pembayaran.</p></div>`}
+      </div>`).join('') || (tunai.length ? '' : `<div class="card anim-in"><p class="muted mb-0">Belum ada pembayaran.</p></div>`)}
+    ${tunai.length ? `<div class="section-title">Pembayaran tunai ke admin</div>` + tunai.map((t, i) => `
+      <div${stagger(i, 'card')}><div class="d-flex justify-content-between align-items-center">
+        <div><strong>${fmtRp(t.item.amount)}</strong> <span class="muted">TUNAI</span>
+        <div class="muted">${t.loan.id} &middot; dibayar ${fmtDate(t.item.paidAt)}${t.item.manualNote ? ` &middot; ${esc(t.item.manualNote)}` : ''}</div></div>${badge('lunas')}</div>
+      </div>`).join('') : ''}
     <div class="section-title">Riwayat pinjaman</div>
     ${loans.map((l, i) => loanCard(l, false, i)).join('') || `<div class="card anim-in"><p class="muted mb-0">Belum ada pinjaman.</p></div>`}`;
   main.querySelectorAll('[data-proofidx]').forEach((im) => im.addEventListener('click', () => {
@@ -586,6 +599,13 @@ async function vPengajuan() {
     const paid = l.schedule.filter((s) => s.status === 'lunas').length;
     const paidSum = l.schedule.filter((s) => s.status === 'lunas').reduce((a, s) => a + s.amount + (s.lateFeePaid || 0), 0);
     const canCancel = l.schedule.every((s) => s.status === 'belum');
+    const schedRows = l.schedule.map((s, idx) => `
+      <div class="kv"><span class="k">#${s.n} &middot; jatuh tempo ${fmtDate(s.dueDate)}</span>
+      <span class="v">${fmtRp(s.amount)}${s.status === 'belum'
+        ? ` <button class="btn btn-success btn-sm ms-1" data-mp="${l.id}:${idx}"><i class="bi bi-check2-circle me-1"></i>Tandai Lunas</button>`
+        : (s.status === 'lunas' && s.payMethod === 'tunai'
+          ? ` <span class="muted" style="font-size:12px">TUNAI</span>`
+          : '')}</span></div>`).join('');
     return `
     <div${stagger(i, 'card')}>
       <div class="d-flex justify-content-between align-items-center mb-2">
@@ -598,6 +618,8 @@ async function vPengajuan() {
       <div class="kv"><span class="k">Biaya layanan</span><span class="v">${fmtRp(l.biayaLayanan)}</span></div>
       <div class="kv"><span class="k">Total tagihan</span><span class="v" style="color:var(--gold)">${fmtRp(l.total)}</span></div>
       <div class="kv"><span class="k">Sudah dibayar</span><span class="v">${fmtRp(paidSum)}</span></div>
+      <h4 class="mt-3">Rincian tagihan</h4>
+      ${schedRows}
       ${canCancel
         ? `<button class="btn btn-outline-danger btn-sm w-100 mt-2" data-cancel="${l.id}"><i class="bi bi-x-circle me-1"></i>Batalkan Pinjaman</button>`
         : `<p class="muted mb-0 mt-2" style="font-size:12px"><i class="bi bi-lock-fill me-1"></i>Tidak bisa dibatalkan: sudah ada pembayaran.</p>`}
@@ -656,6 +678,12 @@ async function vPengajuan() {
       toast('Pinjaman dibatalkan.');
       go('pengajuan');
     } catch (e) { toast(e.message, true); }
+  }));
+  main.querySelectorAll('[data-mp]').forEach((b) => b.addEventListener('click', () => {
+    const [loanId, idx] = b.dataset.mp.split(':');
+    const loan = running.find((x) => x.id === loanId);
+    const item = loan && loan.schedule[Number(idx)];
+    if (item) showManualPay(loanId, Number(idx), item.amount, item.dueDate);
   }));
 }
 
@@ -820,6 +848,54 @@ function showProof(src) {
     m = $('#proofModal');
   }
   $('#proofModalImg').src = src;
+  bootstrap.Modal.getOrCreateInstance(m).show();
+}
+
+/** Modal tandai lunas manual / tunai ke admin (v1.9). */
+function showManualPay(loanId, schedIdx, amount, dueDate) {
+  let m = $('#mpModal');
+  if (!m) {
+    document.body.insertAdjacentHTML('beforeend', `
+      <div class="modal fade" id="mpModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+          <div class="modal-content" style="background:#101a14;border:1px solid #e8c26a55">
+            <div class="modal-header" style="border-color:#ffffff18">
+              <h5 class="modal-title mb-0"><i class="bi bi-cash-coin me-2"></i>Tandai Lunas (Tunai)</h5>
+              <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Tutup"></button>
+            </div>
+            <div class="modal-body">
+              <p class="muted" id="mpInfo"></p>
+              <label class="form-label">Tanggal bayar</label>
+              <input type="date" id="mpDate" class="form-control">
+              <label class="form-label mt-2">Catatan (opsional)</label>
+              <input type="text" id="mpNote" class="form-control" maxlength="200" placeholder="cth: cicilan minggu pertama, tunai">
+              <p class="note mt-2 mb-0"><i class="bi bi-info-circle-fill me-1"></i>Denda 1%/hari dihitung sampai tanggal bayar. Peminjam otomatis dapat notifikasi.</p>
+            </div>
+            <div class="modal-footer" style="border-color:#ffffff18">
+              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+              <button type="button" class="btn btn-success" id="mpConfirm"><i class="bi bi-check2-circle me-1"></i>Tandai Lunas</button>
+            </div>
+          </div>
+        </div>
+      </div>`);
+    m = $('#mpModal');
+  }
+  $('#mpInfo').innerHTML = `Tagihan <strong>${fmtRp(amount)}</strong> &middot; jatuh tempo ${fmtDate(dueDate)}`;
+  const d = new Date();
+  $('#mpDate').value = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  $('#mpDate').max = $('#mpDate').value;
+  $('#mpNote').value = '';
+  $('#mpConfirm').onclick = async () => {
+    try {
+      await api('/api/loan-action', 'POST', {
+        action: 'manual-pay', loanId, schedIdx,
+        paidDate: $('#mpDate').value, note: $('#mpNote').value,
+      });
+      toast('Pembayaran tunai tercatat lunas.');
+      bootstrap.Modal.getInstance(m).hide();
+      go('pengajuan');
+    } catch (e) { toast(e.message, true); }
+  };
   bootstrap.Modal.getOrCreateInstance(m).show();
 }
 

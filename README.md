@@ -59,6 +59,12 @@ Total tagihan = Pokok + (Pokok x 0,2% x tenor hari) + Rp 2.000 (biaya layanan)
   menu Ajukan, validasi pengajuan, simulasi, dan persetujuan admin semuanya
   mengikuti batas tenor rank peminjam; kartu Rank menampilkan bonus dan
   tenor maksimum rank saat ini serta hadiah rank berikutnya.
+- **v1.9**: admin bisa menandai pembayaran tunai secara manual — setiap
+  tagihan yang belum dibayar di kartu pinjaman berjalan punya tombol
+  "Tandai Lunas" (dengan pilihan tanggal bayar dan catatan, mis. cicilan
+  minggu pertama). Denda 1%/hari dihitung sampai tanggal bayar, statistik
+  pembayaran & rank peminjam ikut bertambah, dan peminjam otomatis menerima
+  notifikasi. Pembayaran tunai tampil di riwayat peminjam.
 
 ## Arsitektur
 

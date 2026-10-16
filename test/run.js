@@ -495,6 +495,62 @@ function ok(cond, label) {
   r = await call('../api/profile', { method: 'GET', headers: auth(tF) });
   ok(r.json.rankBonus === 25000 && r.json.effectiveLimit === 525000, 'profile: rankBonus & effectiveLimit sinkron');
 
+  // ============ v1.9: tandai lunas manual (tunai ke admin) ============
+  r = await call('../api/auth', { method: 'POST', body: { action: 'register', name: 'Hadi', phone: '081900000007', password: 'hadi1234' } });
+  ok(r.json.ok, 'registrasi Hadi');
+  r = await call('../api/borrowers', { method: 'POST', headers: auth(tA), body: { phone: '081900000007', approve: true, limit: 500000 } });
+  ok(r.json.ok, 'admin setujui Hadi, limit 500rb');
+  const tH = (await call('../api/auth', { method: 'POST', body: { action: 'login', phone: '081900000007', password: 'hadi1234' } })).json.token;
+  r = await call('../api/profile', { method: 'POST', headers: auth(tH), body: { action: 'pencairan', metode: 'dana', nomor: '081522223333', atasNama: 'Hadi Wijaya' } });
+  assert.ok(r.json.ok, 'Hadi isi data pencairan');
+  r = await call('../api/loans', { method: 'POST', headers: auth(tH), body: { pokok: 300000, tenorHari: 15, metode: 'cicilan' } });
+  ok(r.json.ok, 'Hadi ajukan cicilan 15 hari');
+  const loanH = r.json.loan.id;
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId: loanH, approve: true, tenorHari: 15 } });
+  ok(r.json.ok && r.json.loan.schedule.length === 2, 'admin setujui: 2 cicilan');
+  const amt0 = r.json.loan.schedule[0].amount;
+  // peminjam tidak bisa pakai manual-pay
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tH), body: { action: 'manual-pay', loanId: loanH, schedIdx: 0 } });
+  ok(r.status === 403, 'peminjam ditolak manual-pay (403)');
+  // manual-pay di pinjaman yang masih diajukan (punya Gita) ditolak
+  const gitaLoan = (await call('../api/loans', { method: 'GET', headers: auth(tA), body: {} })).json.loans.find((x) => x.borrowerPhone === '081900000006');
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'manual-pay', loanId: gitaLoan.id, schedIdx: 0 } });
+  ok(r.status === 400 && /tidak aktif/i.test(r.json.error), 'manual-pay di pinjaman diajukan ditolak');
+  // paidDate masa depan ditolak
+  const tomorrow = new Date(Date.now() + 864e5).toISOString().slice(0, 10);
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'manual-pay', loanId: loanH, schedIdx: 0, paidDate: tomorrow } });
+  ok(r.status === 400 && /melebihi hari ini/i.test(r.json.error), 'paidDate masa depan ditolak');
+  // notifikasi sebelum
+  const unreadBeforeH = (await call('../api/notifications', { method: 'GET', headers: auth(tH) })).json.unread;
+  // cicilan pertama: tunai tepat waktu (hari ini)
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'manual-pay', loanId: loanH, schedIdx: 0, note: 'cicilan minggu pertama, tunai' } });
+  ok(r.json.ok, 'manual-pay cicilan #1 diterima');
+  const it0 = r.json.loan.schedule[0];
+  ok(it0.status === 'lunas' && it0.payMethod === 'tunai' && it0.lateFeePaid === 0, 'item #1 lunas via tunai tanpa denda');
+  ok(it0.manualNote === 'cicilan minggu pertama, tunai', 'catatan tersimpan');
+  // item yang sama tidak bisa ditandai lagi
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'manual-pay', loanId: loanH, schedIdx: 0 } });
+  ok(r.status === 400 && /sudah diproses/i.test(r.json.error), 'item lunas tidak bisa ditandai lagi');
+  // cicilan kedua: buat telat 3 hari lalu bayar tunai hari ini
+  const lh = await getJSON('loan:' + loanH);
+  const duePast = new Date(Date.now() - 3 * 864e5).toISOString().slice(0, 10);
+  lh.schedule[1].dueDate = duePast;
+  await setJSON('loan:' + loanH, lh);
+  const todayD = new Date().toISOString().slice(0, 10);
+  const expFee = calc.calcLateFee(lh.schedule[1].amount, duePast, todayD).lateFee;
+  ok(expFee > 0, 'skenario telat 3 hari punya denda');
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'manual-pay', loanId: loanH, schedIdx: 1, paidDate: todayD } });
+  ok(r.json.ok, 'manual-pay cicilan #2 diterima');
+  const it1 = r.json.loan.schedule[1];
+  ok(it1.status === 'lunas' && it1.lateFeePaid === expFee, `denda tunai telat = ${expFee}`);
+  ok(r.json.loan.status === 'lunas', 'pinjaman lunas setelah semua item ditandai');
+  // statistik & notifikasi
+  const uH = await getJSON('user:081900000007');
+  ok(uH.stats.payments === 2 && uH.stats.loansLunas === 1, 'stats.payments=2, loansLunas=1');
+  const notifAfter = await call('../api/notifications', { method: 'GET', headers: auth(tH) });
+  ok(notifAfter.json.unread === unreadBeforeH + 2, 'peminjam terima 2 notifikasi manual-pay');
+  ok(notifAfter.json.notifications.some((x) => /tunai ke admin/i.test(x.message)), 'isi notifikasi menyebut tunai ke admin');
+
   console.log(`\nSEMUA TES LOLOS (${n} asersi)`);
 })().catch((e) => {
   console.error('\nTES GAGAL:', e.message);
