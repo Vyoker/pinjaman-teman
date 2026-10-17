@@ -127,6 +127,7 @@ module.exports = requireAuth(async (req, res) => {
 
     return send(res, 400, { ok: false, error: 'Action tidak dikenal.' });
   } catch (e) {
-    return send(res, 500, { ok: false, error: e.message });
+    console.error('[payments]', e);
+      return send(res, 500, { ok: false, error: 'Terjadi kesalahan server. Silakan coba lagi.' });
   }
 });

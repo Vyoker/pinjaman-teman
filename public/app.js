@@ -1,7 +1,7 @@
 'use strict';
 /* Pinjaman Teman — SPA frontend (Bootstrap 5 + animasi) */
 
-const APP_VERSION = '1.9.0';
+const APP_VERSION = '2.0.0';
 const $ = (s) => document.querySelector(s);
 /** Pasang handler ke semua elemen yang cocok (pengganti pola querySelectorAll berulang). */
 const bindAll = (sel, ev, fn) => document.querySelectorAll(sel).forEach((el) => el.addEventListener(ev, fn));
@@ -103,6 +103,7 @@ const NAVS = {
     ['peminjam', 'Peminjam', 'bi-people-fill'],
     ['verifikasi', 'Verifikasi', 'bi-patch-check-fill'],
     ['broadcast', 'Broadcast', 'bi-megaphone-fill'],
+    ['audit', 'Audit Log', 'bi-journal-text'],
     ['pengaturan', 'Pengaturan', 'bi-gear-fill'],
   ],
 };
@@ -194,7 +195,7 @@ function vRegister() {
         <input id="f-name" class="form-control" placeholder="Nama kamu">
         <label class="form-label">Nomor HP</label>
         <input id="f-phone" class="form-control" inputmode="numeric" placeholder="08xxxxxxxxxx">
-        <label class="form-label">Password (min. 6 karakter)</label>
+        <label class="form-label">Password (min. 8 karakter)</label>
         <input id="f-pass" class="form-control" type="password" placeholder="Password">
         <button class="btn btn-primary w-100 mt-3" id="b-reg"><i class="bi bi-check-circle-fill me-2"></i>Daftar</button>
       </div>
@@ -727,9 +728,16 @@ async function vKlaim() {
 
 async function vPeminjam() {
   const { borrowers } = await api('/api/borrowers');
+  const { requests } = await api('/api/borrowers?view=logout-requests');
   const pend = borrowers.filter((b) => b.status === 'pending');
   const act = borrowers.filter((b) => b.status === 'active');
   main.innerHTML = `
+    ${(requests && requests.length) ? `<div class="section-title">Permintaan logout semua perangkat (${requests.length})</div>
+    ${requests.map((q, i) => `
+      <div${stagger(i, 'card')} style="border-color:rgba(232,194,106,.4)"><div class="d-flex justify-content-between align-items-center">
+        <div><strong>${esc(q.name)}</strong><div class="muted">${esc(q.phone)} &middot; diminta ${fmtDate(q.createdAt)}</div></div>
+        <button class="btn btn-warning btn-sm" data-logoutok="${esc(q.phone)}"><i class="bi bi-box-arrow-right me-1"></i>Setujui Logout</button>
+      </div></div>`).join('')}` : ''}
     <div class="section-title">Menunggu persetujuan (${pend.length})</div>
     ${pend.map((b, i) => `
       <div${stagger(i, 'card')}><div class="d-flex justify-content-between align-items-center mb-2"><div>
@@ -780,6 +788,14 @@ async function vPeminjam() {
     try {
       await api('/api/borrowers', 'POST', { phone: b.dataset.lim, approve: true, limit: Number($('#l-' + b.dataset.lim).value) });
       toast('Limit diperbarui.');
+    } catch (e) { toast(e.message, true); }
+  }));
+  main.querySelectorAll('[data-logoutok]').forEach((b) => b.addEventListener('click', async () => {
+    if (!confirm(`Setujui logout semua perangkat untuk ${b.dataset.logoutok}? Semua sesi login mereka akan dihanguskan.`)) return;
+    try {
+      const j = await api('/api/borrowers', 'POST', { action: 'logout-approve', phone: b.dataset.logoutok });
+      toast(`Disetujui. ${j.sessions || 0} sesi dihanguskan.`);
+      go('peminjam');
     } catch (e) { toast(e.message, true); }
   }));
 }
@@ -972,6 +988,22 @@ async function vAkun() {
         </button>
       </div>`;
     }).join('')}
+    <div${stagger(98, 'card')}>
+      <h3 class="mb-1"><i class="bi bi-shield-lock-fill me-2" style="color:var(--gold)"></i>Keamanan</h3>
+      <p class="muted">Ganti password secara berkala. Password minimal 8 karakter.</p>
+      <label class="form-label">Password lama</label>
+      <input id="pw-old" type="password" class="form-control" autocomplete="current-password">
+      <label class="form-label mt-2">Password baru</label>
+      <input id="pw-new" type="password" class="form-control" autocomplete="new-password">
+      <label class="form-label mt-2">Ulangi password baru</label>
+      <input id="pw-new2" type="password" class="form-control" autocomplete="new-password">
+      <button class="btn btn-primary btn-sm mt-2" id="pw-change"><i class="bi bi-key-fill me-1"></i>Ganti Password</button>
+      <hr style="border-color:#ffffff18">
+      <p class="muted mb-1" style="font-size:13px">Keluar dari semua perangkat (mis. HP hilang). Butuh persetujuan admin.</p>
+      ${d.logoutRequest === 'menunggu'
+        ? '<p class="note warn mb-0"><i class="bi bi-hourglass-split me-1"></i>Permintaanmu menunggu persetujuan admin.</p>'
+        : '<button class="btn btn-outline-warning btn-sm" id="logout-all"><i class="bi bi-box-arrow-right me-1"></i>Minta Logout Semua Perangkat</button>'}
+    </div>
     <div${stagger(99, 'card')} style="border-color:rgba(248,113,113,.35)">
       <h3 class="mb-1" style="color:var(--danger)"><i class="bi bi-trash-fill me-2"></i>Hapus Akun</h3>
       <p class="muted">Akun dan seluruh data diri terhapus permanen. Tidak bisa dilakukan selama masih ada tagihan berjalan.</p>
@@ -988,6 +1020,27 @@ async function vAkun() {
       await api('/api/account-delete', 'POST', { password });
       toast('Akun dihapus. Sampai jumpa.');
       logout();
+    } catch (e) { toast(e.message, true); }
+  });
+
+  $('#pw-change').addEventListener('click', async () => {
+    const oldP = $('#pw-old').value, np = $('#pw-new').value, np2 = $('#pw-new2').value;
+    if (!oldP || !np || !np2) return toast('Isi semua kolom password.', true);
+    if (np !== np2) return toast('Password baru tidak sama.', true);
+    try {
+      const j = await api('/api/auth', 'POST', { action: 'change-password', oldPassword: oldP, newPassword: np });
+      toast(j.message || 'Password diganti.');
+      $('#pw-old').value = $('#pw-new').value = $('#pw-new2').value = '';
+    } catch (e) { toast(e.message, true); }
+  });
+
+  const btnLogoutAll = $('#logout-all');
+  if (btnLogoutAll) btnLogoutAll.addEventListener('click', async () => {
+    if (!confirm('Minta admin untuk mengeluarkan semua perangkat yang login dengan akunmu?')) return;
+    try {
+      const j = await api('/api/profile', 'POST', { action: 'request-logout-all' });
+      toast(j.message || 'Permintaan dikirim.');
+      go('akun');
     } catch (e) { toast(e.message, true); }
   });
 
@@ -1098,6 +1151,26 @@ async function vNotif() {
   api('/api/notifications', 'POST', { action: 'readAll' }).then(refreshNotifBadge).catch(() => {});
 }
 
+/** Jejak audit aksi sensitif admin (v2.0). */
+async function vAudit() {
+  const { audit } = await api('/api/admin-stats?view=audit');
+  main.innerHTML = `
+    <div class="section-title">Audit Log</div>
+    <div${stagger(0, 'card')}>
+      <h3><i class="bi bi-journal-text me-2" style="color:var(--gold)"></i>Jejak Aktivitas Admin</h3>
+      <p class="muted" style="font-size:13px">100 aksi terakhir: persetujuan, penolakan, tandai lunas tunai, ubah limit, hapus akun, verifikasi data, broadcast.</p>
+      ${audit.length ? `<div class="table-responsive"><table class="table table-sm align-middle">
+        <thead><tr><th>Waktu</th><th>Aksi</th><th>Oleh</th><th>Detail</th></tr></thead>
+        <tbody>${audit.map((a) => `<tr>
+          <td class="muted" style="font-size:12px;white-space:nowrap">${fmtDate(a.createdAt)}</td>
+          <td><span class="badge b-menunggu">${esc(a.action)}</span></td>
+          <td style="font-size:13px">${esc(a.actor)}</td>
+          <td style="font-size:13px">${esc(a.detail)}</td>
+        </tr>`).join('')}</tbody></table></div>`
+        : '<p class="muted mb-0"><i class="bi bi-inbox me-2"></i>Belum ada aktivitas tercatat.</p>'}
+    </div>`;
+}
+
 async function vBroadcast() {
   const { borrowers } = await api('/api/borrowers');
   const { history } = await api('/api/notifications');
@@ -1154,7 +1227,7 @@ async function vBroadcast() {
 const VIEWS = {
   login: vLogin, register: vRegister,
   bDash: vBDash, ajukan: vAjukan, bayar: vBayar, riwayat: vRiwayat, akun: vAkun, notif: vNotif,
-  aDash: vADash, pengajuan: vPengajuan, klaim: vKlaim, peminjam: vPeminjam, verifikasi: vVerifikasi, broadcast: vBroadcast, pengaturan: vPengaturan,
+  aDash: vADash, pengajuan: vPengajuan, klaim: vKlaim, peminjam: vPeminjam, verifikasi: vVerifikasi, broadcast: vBroadcast, audit: vAudit, pengaturan: vPengaturan,
 };
 
 $('#btnLogout').addEventListener('click', logout);

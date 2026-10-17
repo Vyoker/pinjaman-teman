@@ -25,7 +25,8 @@ module.exports = requireAuth(async (req, res) => {
       await setJSON('settings', s);
       return send(res, 200, { ok: true, settings: s });
     } catch (e) {
-      return send(res, 500, { ok: false, error: e.message });
+      console.error('[settings]', e);
+      return send(res, 500, { ok: false, error: 'Terjadi kesalahan server. Silakan coba lagi.' });
     }
   }
   return send(res, 405, { ok: false, error: 'Method tidak didukung.' });

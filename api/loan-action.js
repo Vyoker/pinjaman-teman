@@ -7,14 +7,16 @@ const { getJSON, setJSON, nextId, ensureStats } = require('../lib/store');
 const { requireAuth, readBody, send } = require('../lib/auth');
 const { calcLoan, MIN_TENOR, maxTenorFor, calcLateFee, todayStr, formatRp } = require('../lib/calc');
 const { isPencairanComplete } = require('../lib/profile');
+const { audit } = require('../lib/audit');
 
 const DAY = 864e5;
 
-async function decide(res, loan, body) {
+async function decide(res, loan, body, actor) {
   if (loan.status !== 'diajukan') return send(res, 400, { ok: false, error: 'Pinjaman sudah diproses.' });
   if (!body.approve) {
     loan.status = 'ditolak';
     await setJSON('loan:' + loan.id, loan);
+    await audit('tolak-pinjaman', actor, `${loan.id} (${loan.borrowerName}, ${formatRp(loan.pokok)}) ditolak.`);
     return send(res, 200, { ok: true, loan });
   }
   const borrower = await getJSON('user:' + loan.borrowerPhone);
@@ -47,10 +49,11 @@ async function decide(res, loan, body) {
   await setJSON('loan:' + loan.id, loan);
   ensureStats(borrower).totalPinjam += loan.pokok;
   await setJSON('user:' + loan.borrowerPhone, borrower);
+  await audit('setujui-pinjaman', actor, `${loan.id} (${loan.borrowerName}): pokok ${formatRp(loan.pokok)}, tenor ${tn} hari, ${loan.metode}, total ${formatRp(loan.total)}.`);
   return send(res, 200, { ok: true, loan });
 }
 
-async function cancel(res, loan) {
+async function cancel(res, loan, actor) {
   if (loan.status !== 'berjalan') {
     return send(res, 400, { ok: false, error: 'Hanya pinjaman berjalan yang bisa dibatalkan.' });
   }
@@ -66,6 +69,7 @@ async function cancel(res, loan) {
     stats.totalPinjam = Math.max(0, stats.totalPinjam - loan.pokok);
     await setJSON('user:' + loan.borrowerPhone, borrower);
   }
+  await audit('batalkan-pinjaman', actor, `${loan.id} (${loan.borrowerName}, ${formatRp(loan.pokok)}) dibatalkan.`);
   return send(res, 200, { ok: true, loan });
 }
 
@@ -74,7 +78,7 @@ async function cancel(res, loan) {
  * mis. cicilan minggu pertama. Denda dihitung sampai tanggal bayar yang
  * diinput (bisa backdate), statistik & notifikasi peminjam ikut diperbarui.
  */
-async function manualPay(res, loan, body) {
+async function manualPay(res, loan, body, actor) {
   const schedIdx = Number(body.schedIdx);
   const item = loan.schedule[schedIdx];
   if (loan.status !== 'berjalan') return send(res, 400, { ok: false, error: 'Pinjaman tidak aktif.' });
@@ -113,6 +117,7 @@ async function manualPay(res, loan, body) {
   const ids = (await getJSON('idx:notifs')) || [];
   ids.push(id);
   await setJSON('idx:notifs', ids);
+  await audit('tandai-lunas-tunai', actor, `${loan.id} (${loan.borrowerName}): tagihan #${item.n} ${formatRp(item.amount)}${daysLate > 0 ? ` + denda ${formatRp(lateFee)}` : ''}, tgl bayar ${paidDate}.`);
   return send(res, 200, { ok: true, loan });
 }
 
@@ -123,9 +128,9 @@ module.exports = requireAuth(async (req, res) => {
     const action = body.action || 'decide';
     const loan = await getJSON('loan:' + String(body.loanId || ''));
     if (!loan) return send(res, 404, { ok: false, error: 'Pinjaman tidak ditemukan.' });
-    if (action === 'decide') return decide(res, loan, body);
-    if (action === 'cancel') return cancel(res, loan);
-    if (action === 'manual-pay') return manualPay(res, loan, body);
+    if (action === 'decide') return decide(res, loan, body, req.session.phone);
+    if (action === 'cancel') return cancel(res, loan, req.session.phone);
+    if (action === 'manual-pay') return manualPay(res, loan, body, req.session.phone);
     return send(res, 400, { ok: false, error: 'Aksi tidak dikenal.' });
   } catch (e) {
     return send(res, 400, { ok: false, error: e.message });

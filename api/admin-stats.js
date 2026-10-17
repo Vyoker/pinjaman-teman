@@ -4,6 +4,7 @@ const { getJSON } = require('../lib/store');
 const { requireAuth, send } = require('../lib/auth');
 const { calcLateFee, todayStr } = require('../lib/calc');
 const { countPending } = require('../lib/profile');
+const { listAudit } = require('../lib/audit');
 
 function addDaysStr(base, n) {
   return new Date(new Date(base + 'T00:00:00Z').getTime() + n * 864e5).toISOString().slice(0, 10);
@@ -11,6 +12,12 @@ function addDaysStr(base, n) {
 
 module.exports = requireAuth(async (req, res) => {
   if (req.method !== 'GET') return send(res, 405, { ok: false, error: 'Method tidak didukung.' });
+
+  // Jejak audit (v2.0): ?view=audit
+  const url0 = new URL(req.url, 'http://x');
+  if (url0.searchParams.get('view') === 'audit') {
+    return send(res, 200, { ok: true, audit: await listAudit(100) });
+  }
 
   const loanIds = (await getJSON('idx:loans')) || [];
   const claimIds = (await getJSON('idx:claims')) || [];

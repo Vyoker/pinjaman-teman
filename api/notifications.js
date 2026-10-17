@@ -10,6 +10,7 @@
 const { getJSON, setJSON, nextId } = require('../lib/store');
 const { requireAuth, readBody, send, normPhone } = require('../lib/auth');
 const { calcLateFee, todayStr } = require('../lib/calc');
+const { audit } = require('../lib/audit');
 
 function fmtRp(n) { return 'Rp ' + Number(n || 0).toLocaleString('id-ID'); }
 
@@ -115,6 +116,7 @@ async function broadcast(req, res) {
     sent.push(rec);
   }
   await setJSON('idx:notifs', ids);
+  await audit('broadcast', req.session.phone, `${mode === 'all' ? 'semua user' : sent.length + ' user'}: ${message.slice(0, 120)}`);
   return send(res, 200, { ok: true, sent: sent.length, notifications: sent });
 }
 

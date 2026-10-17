@@ -91,7 +91,8 @@ module.exports = requireAuth(async (req, res) => {
       await idxPush('idx:loans', id);
       return send(res, 200, { ok: true, loan });
     } catch (e) {
-      return send(res, 500, { ok: false, error: e.message });
+      console.error('[loans]', e);
+      return send(res, 500, { ok: false, error: 'Terjadi kesalahan server. Silakan coba lagi.' });
     }
   }
 

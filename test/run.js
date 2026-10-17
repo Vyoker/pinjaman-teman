@@ -118,10 +118,10 @@ function ok(cond, label) {
 
   console.log('== Tes alur API ==');
   // 1. registrasi
-  let r = await call('../api/auth', { method: 'POST', body: { action: 'register', name: 'Budi', phone: '08123456789', password: 'budi123' } });
+  let r = await call('../api/auth', { method: 'POST', body: { action: 'register', name: 'Budi', phone: '08123456789', password: 'budi1234' } });
   ok(r.json.ok, 'registrasi Budi');
   // 2. login sebelum disetujui -> 403
-  r = await call('../api/auth', { method: 'POST', body: { action: 'login', phone: '08123456789', password: 'budi123' } });
+  r = await call('../api/auth', { method: 'POST', body: { action: 'login', phone: '08123456789', password: 'budi1234' } });
   ok(r.status === 403, 'login pending ditolak (403)');
   // 3. login admin
   r = await call('../api/auth', { method: 'POST', body: { action: 'login', phone: '0811000000', password: 'admin-kuat-123' } });
@@ -132,7 +132,7 @@ function ok(cond, label) {
   r = await call('../api/borrowers', { method: 'POST', headers: auth(tA), body: { phone: '08123456789', approve: true, limit: 1000000 } });
   ok(r.json.ok, 'admin setujui Budi, limit 1jt');
   // 5. login Budi
-  r = await call('../api/auth', { method: 'POST', body: { action: 'login', phone: '08123456789', password: 'budi123' } });
+  r = await call('../api/auth', { method: 'POST', body: { action: 'login', phone: '08123456789', password: 'budi1234' } });
   ok(r.json.ok && r.json.role === 'borrower', 'login Budi');
   const tB = r.json.token;
   // Budi isi data pencairan (wajib sebelum approve)
@@ -550,6 +550,66 @@ function ok(cond, label) {
   const notifAfter = await call('../api/notifications', { method: 'GET', headers: auth(tH) });
   ok(notifAfter.json.unread === unreadBeforeH + 2, 'peminjam terima 2 notifikasi manual-pay');
   ok(notifAfter.json.notifications.some((x) => /tunai ke admin/i.test(x.message)), 'isi notifikasi menyebut tunai ke admin');
+
+  // ============ v2.0: keamanan ============
+  // password minimal 8 karakter
+  r = await call('../api/auth', { method: 'POST', body: { action: 'register', name: 'Ira', phone: '081900000008', password: 'pendek7' } });
+  ok(r.status === 400 && /8 karakter/i.test(r.json.error), 'register password 7 karakter ditolak');
+  r = await call('../api/auth', { method: 'POST', body: { action: 'register', name: 'Ira', phone: '081900000008', password: 'ira12345' } });
+  ok(r.json.ok, 'registrasi Ira (8 karakter)');
+  r = await call('../api/borrowers', { method: 'POST', headers: auth(tA), body: { phone: '081900000008', approve: true, limit: 400000 } });
+  ok(r.json.ok, 'admin setujui Ira');
+  // rate limit login: 3x gagal -> kunci sampai besok
+  r = await call('../api/auth', { method: 'POST', body: { action: 'login', phone: '081900000008', password: 'salah1' } });
+  ok(r.status === 401 && /Sisa 2 percobaan/.test(r.json.error), 'gagal ke-1: sisa 2');
+  r = await call('../api/auth', { method: 'POST', body: { action: 'login', phone: '081900000008', password: 'salah2' } });
+  ok(r.status === 401 && /Sisa 1 percobaan/.test(r.json.error), 'gagal ke-2: sisa 1');
+  r = await call('../api/auth', { method: 'POST', body: { action: 'login', phone: '081900000008', password: 'salah3' } });
+  ok(r.status === 401 && /besok/i.test(r.json.error), 'gagal ke-3: kunci sampai besok');
+  r = await call('../api/auth', { method: 'POST', body: { action: 'login', phone: '081900000008', password: 'ira12345' } });
+  ok(r.status === 429 && /besok/i.test(r.json.error), 'password benar pun ditolak saat terkunci');
+  // simulasi hari berganti: kunci ter-reset
+  await setJSON('rl:login:081900000008', { fails: 3, date: '2000-01-01' });
+  r = await call('../api/auth', { method: 'POST', body: { action: 'login', phone: '081900000008', password: 'ira12345' } });
+  ok(r.json.ok && r.json.role === 'borrower', 'login berhasil setelah hari berganti');
+  const tI = r.json.token;
+  // ganti password
+  r = await call('../api/auth', { method: 'POST', headers: auth(tI), body: { action: 'change-password', oldPassword: 'keliru', newPassword: 'irabaru12' } });
+  ok(r.status === 400 && /lama salah/i.test(r.json.error), 'ganti password: password lama salah ditolak');
+  r = await call('../api/auth', { method: 'POST', headers: auth(tI), body: { action: 'change-password', oldPassword: 'ira12345', newPassword: 'pendek' } });
+  ok(r.status === 400 && /8 karakter/i.test(r.json.error), 'ganti password: baru <8 ditolak');
+  r = await call('../api/auth', { method: 'POST', headers: auth(tI), body: { action: 'change-password', oldPassword: 'ira12345', newPassword: 'irabaru12' } });
+  ok(r.json.ok, 'ganti password berhasil');
+  r = await call('../api/auth', { method: 'POST', body: { action: 'login', phone: '081900000008', password: 'ira12345' } });
+  ok(r.status === 401, 'password lama tidak bisa dipakai lagi');
+  r = await call('../api/auth', { method: 'POST', body: { action: 'login', phone: '081900000008', password: 'irabaru12' } });
+  ok(r.json.ok, 'login dengan password baru berhasil');
+  const tI2 = r.json.token;
+  // rate limit register: 3x/jam per IP
+  const iph = { 'x-forwarded-for': '9.9.9.9' };
+  for (let k = 1; k <= 3; k++) {
+    r = await call('../api/auth', { method: 'POST', headers: iph, body: { action: 'register', name: 'Spam' + k, phone: '08190000010' + k, password: 'spam1234' } });
+    ok(r.json.ok, `register ke-${k} dari IP sama diterima`);
+  }
+  r = await call('../api/auth', { method: 'POST', headers: iph, body: { action: 'register', name: 'Spam4', phone: '081900000104', password: 'spam1234' } });
+  ok(r.status === 429, 'register ke-4 dalam sejam dari IP sama ditolak');
+  // audit log mencatat aksi admin
+  r = await call('../api/admin-stats', { method: 'GET', headers: auth(tA), url: '/api/admin-stats?view=audit' });
+  ok(r.json.ok && r.json.audit.some((a) => a.action === 'setujui-pendaftaran' && /081900000008/.test(a.detail)), 'audit: persetujuan Ira tercatat');
+  ok(r.json.audit.some((a) => a.action === 'ganti-password'), 'audit: ganti password tercatat');
+  // logout semua perangkat: minta -> setujui admin
+  r = await call('../api/profile', { method: 'POST', headers: auth(tI2), body: { action: 'request-logout-all' } });
+  ok(r.json.ok, 'Ira minta logout semua perangkat');
+  r = await call('../api/profile', { method: 'POST', headers: auth(tI2), body: { action: 'request-logout-all' } });
+  ok(r.status === 400 && /menunggu/i.test(r.json.error), 'permintaan ganda ditolak');
+  r = await call('../api/borrowers', { method: 'GET', headers: auth(tA), url: '/api/borrowers?view=logout-requests' });
+  ok(r.json.requests.some((x) => x.phone === '081900000008'), 'admin melihat permintaan logout Ira');
+  r = await call('../api/borrowers', { method: 'POST', headers: auth(tA), body: { action: 'logout-approve', phone: '081900000008' } });
+  ok(r.json.ok && r.json.sessions >= 1, 'admin setujui: sesi dihanguskan');
+  r = await call('../api/me', { method: 'GET', headers: auth(tI2) });
+  ok(r.status === 401, 'token lama Ira hangus setelah logout semua');
+  r = await call('../api/borrowers', { method: 'POST', headers: auth(tA), body: { action: 'logout-approve', phone: '081900000008' } });
+  ok(r.status === 400, 'approve permintaan yang sama dua kali ditolak');
 
   console.log(`\nSEMUA TES LOLOS (${n} asersi)`);
 })().catch((e) => {

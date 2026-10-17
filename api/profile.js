@@ -6,6 +6,7 @@ const { getJSON, setJSON } = require('../lib/store');
 const { requireAuth, readBody, send, normPhone } = require('../lib/auth');
 const { FIELD_MAP, ensureProfile, validateField, validatePencairan, limitBonus, maxBonus, effectiveLimit } = require('../lib/profile');
 const { rankBonusFor } = require('../lib/calc');
+const { audit } = require('../lib/audit');
 
 function shape(user) {
   const profile = ensureProfile(user);
@@ -41,11 +42,31 @@ module.exports = requireAuth(async (req, res) => {
     if (sess.role !== 'borrower') return send(res, 403, { ok: false, error: 'Khusus peminjam.' });
     const user = await getJSON('user:' + sess.phone);
     if (!user) return send(res, 404, { ok: false, error: 'Akun tidak ditemukan.' });
-    return send(res, 200, shape(user));
+    const out = shape(user);
+    const lr = await getJSON('logoutreq:' + sess.phone);
+    out.logoutRequest = lr && lr.status === 'menunggu' ? 'menunggu' : null;
+    return send(res, 200, out);
   }
 
   if (req.method === 'POST') {
     const body = await readBody(req);
+    // Peminjam: minta logout semua perangkat (butuh persetujuan admin) — v2.0
+    if (body.action === 'request-logout-all') {
+      if (sess.role !== 'borrower') return send(res, 403, { ok: false, error: 'Khusus peminjam.' });
+      const user = await getJSON('user:' + sess.phone);
+      if (!user) return send(res, 404, { ok: false, error: 'Akun tidak ditemukan.' });
+      const existing = await getJSON('logoutreq:' + sess.phone);
+      if (existing && existing.status === 'menunggu') {
+        return send(res, 400, { ok: false, error: 'Permintaanmu masih menunggu persetujuan admin.' });
+      }
+      await setJSON('logoutreq:' + sess.phone, {
+        phone: sess.phone, name: user.name, status: 'menunggu',
+        createdAt: new Date().toISOString(), decidedAt: null,
+      });
+      const ids = (await getJSON('idx:logoutreqs')) || [];
+      if (!ids.includes(sess.phone)) { ids.push(sess.phone); await setJSON('idx:logoutreqs', ids); }
+      return send(res, 200, { ok: true, message: 'Permintaan dikirim. Menunggu persetujuan admin.' });
+    }
     // Peminjam: simpan data pencairan (gabungan pencairan.js sejak v1.4.1)
     if (body.action === 'pencairan') {
       if (sess.role !== 'borrower') return send(res, 403, { ok: false, error: 'Khusus peminjam.' });
@@ -74,6 +95,7 @@ module.exports = requireAuth(async (req, res) => {
       cur.status = approve ? 'disetujui' : 'ditolak';
       cur.updatedAt = new Date().toISOString();
       await setJSON('user:' + phone, target);
+      await audit('verifikasi-data', sess.phone, `${target.name} (${phone}): ${field} ${cur.status}.`);
       return send(res, 200, {
         ok: true, field, status: cur.status,
         bonus: limitBonus(tProfile), effectiveLimit: effectiveLimit(target),

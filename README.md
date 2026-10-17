@@ -65,6 +65,13 @@ Total tagihan = Pokok + (Pokok x 0,2% x tenor hari) + Rp 2.000 (biaya layanan)
   minggu pertama). Denda 1%/hari dihitung sampai tanggal bayar, statistik
   pembayaran & rank peminjam ikut bertambah, dan peminjam otomatis menerima
   notifikasi. Pembayaran tunai tampil di riwayat peminjam.
+- **v2.0 (keamanan)**: rate limit login — 3x gagal dalam sehari (WIB) kunci
+  akun sampai besok; password minimal 8 karakter + ganti password mandiri di
+  menu Akun; "logout semua perangkat" atas permintaan peminjam yang disetujui
+  admin; rate limit pendaftaran 3x/jam per IP; audit log 100 aksi terakhir
+  admin (persetujuan, penolakan, tandai lunas tunai, ubah limit, hapus akun,
+  verifikasi data, broadcast) di menu Audit Log; pesan error 500 generik
+  (tidak membocorkan detail internal); security headers di vercel.json.
 
 ## Arsitektur
 
