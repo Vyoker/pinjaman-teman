@@ -72,6 +72,16 @@ Total tagihan = Pokok + (Pokok x 0,2% x tenor hari) + Rp 2.000 (biaya layanan)
   admin (persetujuan, penolakan, tandai lunas tunai, ubah limit, hapus akun,
   verifikasi data, broadcast) di menu Audit Log; pesan error 500 generik
   (tidak membocorkan detail internal); security headers di vercel.json.
+- **v2.1 (gadai barang)**: fitur terpisah dari pinjaman tunai — peminjam
+  mengajukan gadai lewat menu Gadai (nama barang, kondisi, foto wajib,
+  jumlah diinginkan); admin verifikasi dengan nilai taksir + jumlah
+  disetujui (maks 80% taksir) + tenor; setelah disetujui peminjam
+  menyerahkan barang fisik, admin tekan "Barang diterima" maka dana cair
+  dan tagihan berjalan (rumus bunga/biaya/denda sama); denda 1%/hari
+  tetap berjalan selama nunggak dan barang ditahan sampai lunas penuh;
+  setelah lunas admin tekan "Barang dikembalikan". Slot aktif terpisah
+  (1 tunai + 1 gadai boleh jalan bareng); menu Bayar dibagi 2 seksi
+  (Pinjaman Tunai & Gadai Barang).
 
 ## Arsitektur
 

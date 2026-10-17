@@ -1,7 +1,7 @@
 'use strict';
 /* Pinjaman Teman — SPA frontend (Bootstrap 5 + animasi) */
 
-const APP_VERSION = '2.0.0';
+const APP_VERSION = '2.1.0';
 const $ = (s) => document.querySelector(s);
 /** Pasang handler ke semua elemen yang cocok (pengganti pola querySelectorAll berulang). */
 const bindAll = (sel, ev, fn) => document.querySelectorAll(sel).forEach((el) => el.addEventListener(ev, fn));
@@ -92,6 +92,7 @@ const NAVS = {
   borrower: [
     ['bDash', 'Beranda', 'bi-grid-1x2-fill'],
     ['ajukan', 'Ajukan', 'bi-plus-circle-fill'],
+    ['gadai', 'Gadai', 'bi-gem'],
     ['bayar', 'Bayar', 'bi-wallet2'],
     ['riwayat', 'Riwayat', 'bi-clock-history'],
     ['akun', 'Akun', 'bi-person-fill'],
@@ -216,6 +217,13 @@ function vRegister() {
 /* ============ PEMINJAM ============ */
 
 function loanCard(l, showSchedule, i) {
+  const isGadai = (l.jenis || 'tunai') === 'gadai';
+  const jenisBadge = isGadai
+    ? '<span class="badge ms-1" style="background:#7dd3fc22;color:#7dd3fc;border:1px solid #7dd3fc66"><i class="bi bi-gem me-1"></i>GADAI</span>'
+    : '';
+  const barangRow = isGadai && l.barang ? `
+      <div class="kv"><span class="k">Barang</span><span class="v">${esc(l.barang.nama || '-')}</span></div>
+      ${l.barang.taksirAdmin ? `<div class="kv"><span class="k">Taksir admin</span><span class="v">${fmtRp(l.barang.taksirAdmin)}</span></div>` : ''}` : '';
   const sched = showSchedule ? `
     <h4>Jadwal ${l.metode === 'cicilan' ? 'cicilan' : 'pelunasan'}</h4>
     <div class="table-responsive"><table class="table table-hover align-middle">
@@ -228,8 +236,9 @@ function loanCard(l, showSchedule, i) {
   return `
     <div${stagger(i || 0, 'card')}>
       <div class="d-flex justify-content-between align-items-center mb-2">
-        <strong class="fs-5">${fmtRp(l.pokok)}</strong>${badge(l.status)}
+        <strong class="fs-5">${fmtRp(l.pokok)}</strong><div>${badge(l.status)}${jenisBadge}</div>
       </div>
+      ${barangRow}
       <div class="kv"><span class="k">Tenor</span><span class="v">${l.tenorHari || l.tenorProposal} hari</span></div>
       <div class="kv"><span class="k">Metode</span><span class="v">${l.metode === 'cicilan' ? 'Cicilan' : 'Sekaligus'}</span></div>
       ${l.total ? `<div class="kv"><span class="k">Total tagihan</span><span class="v big">${fmtRp(l.total)}</span></div>` : ''}
@@ -269,8 +278,10 @@ async function vBDash() {
   const me = await api('/api/me');
   S.name = me.name; S.phone = me.phone;
   const { loans } = await api('/api/loans');
-  const active = loans.find((l) => l.status === 'diajukan' || l.status === 'berjalan');
-  const hist = loans.filter((l) => l !== active);
+  const isAktif = (l) => ['diajukan', 'disetujui', 'berjalan'].includes(l.status);
+  const activeTunai = loans.find((l) => (l.jenis || 'tunai') === 'tunai' && isAktif(l));
+  const activeGadai = loans.find((l) => (l.jenis || 'tunai') === 'gadai' && isAktif(l));
+  const hist = loans.filter((l) => l !== activeTunai && l !== activeGadai);
   const rk = me.rank, nx = me.nextRank, stt = me.stats || { payments: 0, loansLunas: 0, totalPinjam: 0 };
   const pct = nx ? Math.min(100, Math.round((stt.payments / nx.min) * 100)) : 100;
   const rankCard = `
@@ -298,16 +309,21 @@ async function vBDash() {
       ${(me.bonusLimit || 0) > 0
         ? `<div class="muted" style="font-size:12px">termasuk bonus data diri ${fmtRp(me.bonusLimit)}</div>`
         : `<div class="muted" style="font-size:12px">Mau limit lebih besar? <a href="#" id="b-lengkapi" style="color:var(--gold)">Lengkapi data diri</a></div>`}
-      ${active ? '' : '<button class="btn btn-primary w-100 mt-3" id="b-ajukan"><i class="bi bi-plus-circle-fill me-2"></i>Ajukan Pinjaman</button>'}
+      ${activeTunai ? '' : '<button class="btn btn-primary w-100 mt-3" id="b-ajukan"><i class="bi bi-plus-circle-fill me-2"></i>Ajukan Pinjaman</button>'}
+      ${activeGadai ? '' : '<button class="btn btn-outline-light w-100 mt-2" id="b-gadai"><i class="bi bi-gem me-2"></i>Gadai Barang</button>'}
     </div>
-    ${dueBanner(active)}
+    ${dueBanner(activeTunai)}${dueBanner(activeGadai)}
     ${rankCard}
-    <div class="section-title">Pinjaman berjalan</div>
-    ${active ? loanCard(active, true, 2) : `<div${stagger(2, 'card')}><p class="muted mb-0"><i class="bi bi-inbox me-2"></i>Tidak ada pinjaman aktif.</p></div>`}
+    <div class="section-title">Pinjaman & gadai berjalan</div>
+    ${activeTunai ? loanCard(activeTunai, true, 2) : ''}
+    ${activeGadai ? loanCard(activeGadai, true, 3) : ''}
+    ${(!activeTunai && !activeGadai) ? `<div${stagger(2, 'card')}><p class="muted mb-0"><i class="bi bi-inbox me-2"></i>Tidak ada pinjaman aktif.</p></div>` : ''}
     <div class="section-title">Riwayat</div>
-    ${hist.map((l, i) => loanCard(l, false, i + 3)).join('') || `<div class="card anim-in"><p class="muted mb-0">Belum ada riwayat.</p></div>`}`;
+    ${hist.map((l, i) => loanCard(l, false, i + 4)).join('') || `<div class="card anim-in"><p class="muted mb-0">Belum ada riwayat.</p></div>`}`;
   const b = $('#b-ajukan');
   if (b) b.addEventListener('click', () => go('ajukan'));
+  const bg = $('#b-gadai');
+  if (bg) bg.addEventListener('click', () => go('gadai'));
   const bc = $('#b-bayar-cepat');
   if (bc) bc.addEventListener('click', () => go('bayar'));
   const bl = $('#b-lengkapi');
@@ -398,24 +414,130 @@ async function vAjukan() {
   });
 }
 
+/* ============ GADAI BARANG (v2.1) ============ */
+async function vGadai() {
+  const { loans } = await api('/api/loans');
+  const g = loans.filter((l) => (l.jenis || 'tunai') === 'gadai');
+  const active = g.find((l) => ['diajukan', 'disetujui', 'berjalan'].includes(l.status));
+  const titipTxt = { diajukan: 'Menunggu verifikasi admin', menunggu: 'Serahkan barang fisik ke admin', dititipkan: 'Barang dititipkan ke admin', dikembalikan: 'Barang sudah dikembalikan' };
+
+  if (active) {
+    const b = active.barang || {};
+    main.innerHTML = `
+    <div class="section-title">Gadai aktif</div>
+    <div${stagger(0, 'card')}>
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <strong class="fs-5">${esc(b.nama || 'Gadai')}</strong>${badge(active.status)}
+      </div>
+      ${b.foto ? `<img src="${b.foto}" class="proof-thumb mb-2" alt="Foto barang">` : ''}
+      ${b.deskripsi ? `<p class="muted" style="font-size:13px">${esc(b.deskripsi)}</p>` : ''}
+      <div class="kv"><span class="k">Pengajuan kamu</span><span class="v">${fmtRp(active.pokok)}</span></div>
+      ${b.taksirAdmin ? `<div class="kv"><span class="k">Taksir admin</span><span class="v">${fmtRp(b.taksirAdmin)}</span></div>` : ''}
+      ${active.status !== 'diajukan' ? `<div class="kv"><span class="k">Plafon disetujui</span><span class="v" style="color:var(--gold)">${fmtRp(active.pokok)}</span></div>
+      <div class="kv"><span class="k">Tenor</span><span class="v">${active.tenorHari} hari &middot; ${active.metode === 'cicilan' ? 'Cicilan' : 'Sekaligus'}</span></div>` : ''}
+      <div class="kv"><span class="k">Status barang</span><span class="v">${titipTxt[b.statusTitip] || b.statusTitip || '-'}</span></div>
+      ${active.status === 'disetujui' ? '<p class="note warn"><i class="bi bi-exclamation-triangle-fill me-1"></i>Pengajuan disetujui. Serahkan barang fisik ke admin agar dana cair.</p>' : ''}
+    </div>
+    ${g.filter((l) => l !== active).length ? '<div class="section-title">Riwayat gadai</div>' + g.filter((l) => l !== active).map((l, i) => loanCard(l, false, i + 1)).join('') : ''}`;
+    return;
+  }
+
+  // Form pengajuan baru
+  const me = await api('/api/me');
+  const maxT = me.maxTenor || 30;
+  main.innerHTML = `
+    <div${stagger(0, 'card')}>
+      <h3><i class="bi bi-gem me-2" style="color:var(--gold)"></i>Gadai Barang</h3>
+      <p class="muted" style="font-size:13px">Jaminan barang fisik yang dititipkan ke admin. Plafon maksimal 80% dari nilai taksir admin. Barang dikembalikan saat lunas.</p>
+      ${!me.pencairan ? '<p class="note warn"><i class="bi bi-exclamation-triangle-fill me-1"></i>Kamu belum mengisi data pencairan. Isi dulu di menu Akun agar dana bisa dicairkan.</p>' : ''}
+      <label class="form-label">Nama barang</label>
+      <input id="g-nama" class="form-control" placeholder="cth: Laptop ASUS, HP Samsung A54">
+      <label class="form-label mt-2">Kondisi / deskripsi</label>
+      <textarea id="g-desk" class="form-control" rows="2" placeholder="Kondisi barang, kelengkapan, minus apa"></textarea>
+      <label class="form-label mt-2">Foto barang (wajib)</label>
+      <input id="g-foto" type="file" accept="image/*" class="form-control">
+      <div id="g-pv" class="mt-2"></div>
+      <label class="form-label mt-2">Jumlah yang diinginkan (Rp)</label>
+      <input id="g-pokok" class="form-control" type="number" min="50000" step="50000" placeholder="500000">
+      <label class="form-label mt-2">Tenor: <strong id="g-tenor-lbl" style="color:var(--gold)">30</strong> hari</label>
+      <input id="g-tenor" class="form-range" type="range" min="15" max="${maxT}" value="30">
+      <label class="form-label">Metode pelunasan</label>
+      <div class="radio-cards">
+        <label><input type="radio" name="g-metode" value="lunas" checked> Sekaligus</label>
+        <label><input type="radio" name="g-metode" value="cicilan"> Cicilan</label>
+      </div>
+      <div id="g-sim"></div>
+      <button class="btn btn-primary w-100 mt-3" id="g-submit"><i class="bi bi-send-fill me-2"></i>Kirim Pengajuan Gadai</button>
+    </div>`;
+
+  const tRange = $('#g-tenor');
+  const paint = () => {
+    const p = maxT > 15 ? ((tRange.value - 15) / (maxT - 15)) * 100 : 0;
+    tRange.style.setProperty('--fill', p + '%');
+  };
+  const renderSim = async () => {
+    const pokok = Number($('#g-pokok').value);
+    const tenor = Number(tRange.value);
+    $('#g-tenor-lbl').textContent = tenor;
+    paint();
+    if (!pokok || pokok <= 0) { $('#g-sim').innerHTML = ''; return; }
+    try {
+      const s = await api('/api/simulate', 'POST', { pokok, tenorHari: tenor, metode: document.querySelector('input[name="g-metode"]:checked').value });
+      $('#g-sim').innerHTML = `<div class="anim-pop"><h4>Simulasi tebusan</h4>
+        <div class="kv"><span class="k">Bunga (0,2%/hari)</span><span class="v">${fmtRp(s.bunga)}</span></div>
+        <div class="kv"><span class="k">Biaya layanan</span><span class="v">${fmtRp(s.biayaLayanan)}</span></div>
+        <div class="kv"><span class="k">Total tebusan</span><span class="v big">${fmtRp(s.total)}</span></div>
+        <p class="note"><i class="bi bi-info-circle-fill me-1"></i>Jumlah final ditentukan admin (maks 80% taksir). Tenor final 15–${s.maxTenor || 30} hari.</p></div>`;
+    } catch (e) { $('#g-sim').innerHTML = `<p class="note warn">${esc(e.message)}</p>`; }
+  };
+  const deb = () => { clearTimeout(simTimer); simTimer = setTimeout(renderSim, 450); };
+  $('#g-pokok').addEventListener('input', deb);
+  tRange.addEventListener('input', deb);
+  document.querySelectorAll('input[name="g-metode"]').forEach((r) => r.addEventListener('change', renderSim));
+  paint();
+  $('#g-foto').addEventListener('change', (e) => {
+    const f = e.target.files[0];
+    $('#g-pv').innerHTML = f ? `<img src="${URL.createObjectURL(f)}" class="proof-thumb" alt="Preview barang">` : '';
+  });
+  $('#g-submit').addEventListener('click', async () => {
+    try {
+      const f = $('#g-foto').files[0];
+      if (!f) return toast('Lampirkan foto barang dulu.', true);
+      const foto = await compressImage(f);
+      await api('/api/loans', 'POST', {
+        jenis: 'gadai',
+        pokok: Number($('#g-pokok').value),
+        tenorHari: Number(tRange.value),
+        metode: document.querySelector('input[name="g-metode"]:checked').value,
+        barang: { nama: $('#g-nama').value, deskripsi: $('#g-desk').value, foto },
+      });
+      toast('Pengajuan gadai terkirim. Menunggu verifikasi admin.');
+      go('gadai');
+    } catch (e) { toast(e.message, true); }
+  });
+}
+
 async function vBayar() {
   const { loans } = await api('/api/loans');
   const berjalan = loans.filter((l) => l.status === 'berjalan');
-  const items = [];
+  const itemsTunai = [], itemsGadai = [];
   berjalan.forEach((l) => l.schedule.forEach((s, i) => {
-    if (s.status === 'belum' || s.status === 'diklaim') items.push({ l, s, i });
+    if (s.status === 'belum' || s.status === 'diklaim') {
+      (((l.jenis || 'tunai') === 'gadai') ? itemsGadai : itemsTunai).push({ l, s, i });
+    }
   }));
-  if (!items.length) {
+  if (!itemsTunai.length && !itemsGadai.length) {
     main.innerHTML = `<div${stagger(0, 'card')}><p class="muted mb-0"><i class="bi bi-check-circle-fill me-2"></i>Tidak ada tagihan yang perlu dibayar.</p></div>`;
     return;
   }
-  main.innerHTML = `<div class="section-title">Tagihan belum dibayar</div>` + items.map(({ l, s, i }, idx) => {
+  const jns = (l) => (l.jenis || 'tunai') === 'gadai' && l.barang ? ` &middot; <i class="bi bi-gem"></i> ${esc(l.barang.nama)}` : '';
+  const cardHtml = ({ l, s, i }, idx) => {
     const key = l.id + '_' + i;
     const title = l.metode === 'cicilan' ? `Cicilan ${s.n}/${l.nCicilan}` : 'Pelunasan';
     if (s.status === 'diklaim') {
       return `<div${stagger(idx, 'card')}><div class="d-flex justify-content-between align-items-center">
         <div><strong>${title}</strong>
-        <div class="muted">${fmtRp(l.pokok)} &middot; jatuh tempo ${fmtDate(s.dueDate)}</div></div>
+        <div class="muted">${fmtRp(l.pokok)} &middot; jatuh tempo ${fmtDate(s.dueDate)}${jns(l)}</div></div>
         ${badge('menunggu')}</div>
         <p class="muted mb-0 mt-2"><i class="bi bi-hourglass-split me-1"></i>Laporan bayar ${fmtRp(s.amount)} menunggu konfirmasi admin.</p></div>`;
     }
@@ -423,7 +545,7 @@ async function vBayar() {
     <div${stagger(idx, 'card')}>
       <div class="d-flex justify-content-between align-items-center mb-1">
         <div><strong>${title}</strong>
-        <div class="muted">Jatuh tempo ${fmtDate(s.dueDate)}${(s.daysLate || 0) > 0 ? ` &middot; <span style="color:var(--danger);font-weight:700">telat ${s.daysLate} hari</span>` : ''}</div></div>
+        <div class="muted">Jatuh tempo ${fmtDate(s.dueDate)}${(s.daysLate || 0) > 0 ? ` &middot; <span style="color:var(--danger);font-weight:700">telat ${s.daysLate} hari</span>` : ''}${jns(l)}</div></div>
         <div class="text-end"><strong class="fs-5" style="color:var(--gold)">${fmtRp(s.totalDue ?? s.amount)}</strong>
         ${(s.lateFee || 0) > 0 ? `<div class="muted" style="font-size:11px">termasuk denda ${fmtRp(s.lateFee)}</div>` : ''}</div>
       </div>
@@ -441,7 +563,10 @@ async function vBayar() {
         <i class="bi bi-send-fill me-1"></i>Lapor Sudah Bayar
       </button>
     </div>`;
-  }).join('');
+  };
+  main.innerHTML =
+    (itemsTunai.length ? `<div class="section-title">Pinjaman tunai</div>` + itemsTunai.map(cardHtml).join('') : '') +
+    (itemsGadai.length ? `<div class="section-title">Gadai barang</div>` + itemsGadai.map(cardHtml).join('') : '');
 
   const settings = await api('/api/settings').then((j) => j.settings).catch(() => ({}));
   const dest = {
@@ -461,7 +586,7 @@ async function vBayar() {
       <div class="muted mt-1">Transfer dulu ke tujuan di atas, lalu tekan "Lapor Sudah Bayar".</div>
     </div>`;
   };
-  items.forEach(({ l, s, i }) => {
+  [...itemsTunai, ...itemsGadai].forEach(({ l, s, i }) => {
     if (s.status !== 'belum') return;
     const key = l.id + '_' + i;
     $('#m-' + key).addEventListener('change', () => updInfo(key, s));
@@ -570,9 +695,15 @@ async function vADash() {
 }
 
 async function vPengajuan() {
-  const { loans: pending } = await api('/api/loans?status=diajukan');
+  const { loans: pendingAll } = await api('/api/loans?status=diajukan');
   const { loans: running } = await api('/api/loans?status=berjalan');
+  const { loans: disetujui } = await api('/api/loans?status=disetujui');
+  const { loans: lunasAll } = await api('/api/loans?status=lunas');
   const { borrowers } = await api('/api/borrowers');
+  const pending = pendingAll.filter((l) => (l.jenis || 'tunai') === 'tunai');
+  const pendingGadai = pendingAll.filter((l) => (l.jenis || 'tunai') === 'gadai');
+  const menungguBarang = disetujui.filter((l) => (l.jenis || 'tunai') === 'gadai');
+  const gadaiLunas = lunasAll.filter((l) => (l.jenis || 'tunai') === 'gadai' && l.barang && l.barang.statusTitip === 'dititipkan');
   const pcMap = Object.fromEntries(borrowers.map((b) => [b.phone, b.pencairan]));
   const pcTxt = (phone) => {
     const p = pcMap[phone];
@@ -596,6 +727,58 @@ async function vPengajuan() {
         <button class="btn btn-danger btn-sm flex-fill" data-no="${l.id}"><i class="bi bi-x-lg me-1"></i>Tolak</button>
       </div>
     </div>`).join('') || `<div class="card anim-in"><p class="muted mb-0"><i class="bi bi-inbox me-2"></i>Tidak ada pengajuan menunggu.</p></div>`);
+  // --- Pengajuan gadai ---
+  const secGadai = '<div class="section-title">Pengajuan gadai</div>' + (pendingGadai.map((l, i) => {
+    const b = l.barang || {};
+    return `
+    <div${stagger(i, 'card')} style="border-color:rgba(125,211,252,.35)">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <div><strong>${esc(l.borrowerName)}</strong><div class="muted">${esc(b.nama || '')}</div></div>
+        <div>${badge(l.status)}<span class="badge ms-1" style="background:#7dd3fc22;color:#7dd3fc;border:1px solid #7dd3fc66"><i class="bi bi-gem me-1"></i>GADAI</span></div>
+      </div>
+      ${b.foto ? `<img src="${b.foto}" class="proof-thumb mb-2" alt="Foto barang">` : ''}
+      ${b.deskripsi ? `<p class="muted" style="font-size:13px">${esc(b.deskripsi)}</p>` : ''}
+      <div class="kv"><span class="k">Diinginkan</span><span class="v">${fmtRp(l.pokok)}</span></div>
+      <div class="kv"><span class="k">Usulan tenor</span><span class="v">${l.tenorProposal} hari</span></div>
+      <div class="kv"><span class="k">Metode</span><span class="v">${l.metode === 'cicilan' ? 'Cicilan' : 'Sekaligus'}</span></div>
+      <div class="kv"><span class="k">Pencairan</span><span class="v">${pcTxt(l.borrowerPhone)}</span></div>
+      <div class="kv"><span class="k">Diajukan</span><span class="v">${fmtDate(l.createdAt)}</span></div>
+      <label class="form-label">Nilai taksir admin (Rp)</label>
+      <input type="number" id="gt-${l.id}" class="form-control" min="1000" step="1000" placeholder="1000000">
+      <p class="muted mb-1" style="font-size:12px" id="gplafon-${l.id}"></p>
+      <label class="form-label">Jumlah disetujui (Rp, maks 80% taksir)</label>
+      <input type="number" id="gp-${l.id}" class="form-control" min="1000" step="1000" value="${l.pokok}">
+      <label class="form-label mt-2">Tenor final (15–${l.maxTenor || 30} hari)</label>
+      <input type="number" id="gtn-${l.id}" class="form-control" min="15" max="${l.maxTenor || 30}" value="${l.tenorProposal}">
+      <div id="gsim-${l.id}" class="mt-2"></div>
+      <div class="d-flex gap-2 mt-3">
+        <button class="btn btn-primary btn-sm flex-fill" data-okg="${l.id}"><i class="bi bi-check-lg me-1"></i>Setujui Gadai</button>
+        <button class="btn btn-danger btn-sm flex-fill" data-nog="${l.id}"><i class="bi bi-x-lg me-1"></i>Tolak</button>
+      </div>
+    </div>`;
+  }).join('') || `<div class="card anim-in"><p class="muted mb-0"><i class="bi bi-inbox me-2"></i>Tidak ada pengajuan gadai.</p></div>`);
+  // --- Menunggu barang fisik ---
+  const secTunggu = '<div class="section-title">Menunggu barang titipan</div>' + (menungguBarang.map((l, i) => `
+    <div${stagger(i, 'card')} style="border-color:rgba(232,194,106,.4)">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <div><strong>${esc(l.borrowerName)}</strong><div class="muted">${esc((l.barang || {}).nama || '')} &middot; ${l.id}</div></div>
+        ${badge(l.status)}
+      </div>
+      <div class="kv"><span class="k">Plafon disetujui</span><span class="v" style="color:var(--gold)">${fmtRp(l.pokok)}</span></div>
+      <div class="kv"><span class="k">Taksir</span><span class="v">${fmtRp((l.barang || {}).taksirAdmin || 0)}</span></div>
+      <div class="kv"><span class="k">Tenor</span><span class="v">${l.tenorHari} hari</span></div>
+      <button class="btn btn-success btn-sm w-100 mt-2" data-terima="${l.id}"><i class="bi bi-box-seam me-1"></i>Barang Diterima — Cairkan Dana</button>
+      <button class="btn btn-outline-danger btn-sm w-100 mt-2" data-cancel="${l.id}"><i class="bi bi-x-circle me-1"></i>Batalkan</button>
+    </div>`).join('') || `<div class="card anim-in"><p class="muted mb-0"><i class="bi bi-inbox me-2"></i>Tidak ada.</p></div>`);
+  // --- Gadai lunas, barang belum dikembalikan ---
+  const secKembali = (gadaiLunas.length ? '<div class="section-title">Barang menunggu dikembalikan</div>' + gadaiLunas.map((l, i) => `
+    <div${stagger(i, 'card')} style="border-color:rgba(125,211,252,.35)">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <div><strong>${esc(l.borrowerName)}</strong><div class="muted">${esc((l.barang || {}).nama || '')} &middot; ${l.id}</div></div>
+        ${badge('lunas')}
+      </div>
+      <button class="btn btn-primary btn-sm w-100 mt-2" data-serahkan="${l.id}"><i class="bi bi-box-arrow-up me-1"></i>Barang Dikembalikan</button>
+    </div>`).join('') : '');
   const secBerjalan = '<div class="section-title">Pinjaman berjalan</div>' + (running.map((l, i) => {
     const paid = l.schedule.filter((s) => s.status === 'lunas').length;
     const paidSum = l.schedule.filter((s) => s.status === 'lunas').reduce((a, s) => a + s.amount + (s.lateFeePaid || 0), 0);
@@ -607,12 +790,18 @@ async function vPengajuan() {
         : (s.status === 'lunas' && s.payMethod === 'tunai'
           ? ` <span class="muted" style="font-size:12px">TUNAI</span>`
           : '')}</span></div>`).join('');
+    const jBadge = (l.jenis || 'tunai') === 'gadai'
+      ? '<span class="badge ms-1" style="background:#7dd3fc22;color:#7dd3fc;border:1px solid #7dd3fc66"><i class="bi bi-gem me-1"></i>GADAI</span>' : '';
+    const barangInfo = (l.jenis || 'tunai') === 'gadai' && l.barang ? `
+      <div class="kv"><span class="k">Barang</span><span class="v">${esc(l.barang.nama || '-')}</span></div>
+      <div class="kv"><span class="k">Status barang</span><span class="v">${l.barang.statusTitip === 'dititipkan' ? 'Dititipkan ke admin' : esc(l.barang.statusTitip || '-')}</span></div>` : '';
     return `
     <div${stagger(i, 'card')}>
       <div class="d-flex justify-content-between align-items-center mb-2">
         <div><strong>${esc(l.borrowerName)}</strong><div class="muted">${l.id} &middot; ${paid}/${l.schedule.length} terbayar</div></div>
-        ${badge(l.status)}
+        <div>${badge(l.status)}${jBadge}</div>
       </div>
+      ${barangInfo}
       <div class="kv"><span class="k">Pokok</span><span class="v">${fmtRp(l.pokok)}</span></div>
       <div class="kv"><span class="k">Tenor</span><span class="v">${l.tenorHari} hari &middot; ${l.metode === 'cicilan' ? 'Cicilan ' + l.nCicilan + 'x' : 'Sekaligus'}</span></div>
       <div class="kv"><span class="k">Bunga (0,2%/hari)</span><span class="v">${fmtRp(l.bunga)}</span></div>
@@ -626,7 +815,7 @@ async function vPengajuan() {
         : `<p class="muted mb-0 mt-2" style="font-size:12px"><i class="bi bi-lock-fill me-1"></i>Tidak bisa dibatalkan: sudah ada pembayaran.</p>`}
     </div>`;
   }).join('') || `<div class="card anim-in"><p class="muted mb-0"><i class="bi bi-inbox me-2"></i>Tidak ada pinjaman berjalan.</p></div>`);
-  main.innerHTML = secPengajuan + secBerjalan;
+  main.innerHTML = secPengajuan + secGadai + secTunggu + secKembali + secBerjalan;
   // Preview rincian (bunga + biaya + total) per pengajuan, ikut tenor final
   const timers = {};
   const loadSim = async (l) => {
@@ -685,6 +874,77 @@ async function vPengajuan() {
     const loan = running.find((x) => x.id === loanId);
     const item = loan && loan.schedule[Number(idx)];
     if (item) showManualPay(loanId, Number(idx), item.amount, item.dueDate);
+  }));
+  // --- Gadai: simulasi ikut input taksir/pokok/tenor ---
+  const gsimTimers = {};
+  const loadGSim = async (l) => {
+    const el = $('#gsim-' + l.id);
+    if (!el) return;
+    const taksir = Number($('#gt-' + l.id).value);
+    const pk = Number($('#gp-' + l.id).value);
+    const tn = Number($('#gtn-' + l.id).value);
+    const mt = l.maxTenor || 30;
+    const plafon = taksir > 0 ? Math.floor(taksir * 0.8) : 0;
+    $('#gplafon-' + l.id).textContent = taksir > 0 ? `Plafon maksimal 80%: ${fmtRp(plafon)}` : '';
+    if (!Number.isInteger(pk) || pk <= 0 || !Number.isInteger(tn) || tn < 15 || tn > mt) {
+      el.innerHTML = '';
+      return;
+    }
+    try {
+      const s = await api('/api/simulate', 'POST', { pokok: pk, tenorHari: tn, metode: l.metode });
+      el.innerHTML = `
+        <div class="kv"><span class="k">Bunga (0,2%/hari)</span><span class="v">${fmtRp(s.bunga)}</span></div>
+        <div class="kv"><span class="k">Biaya layanan</span><span class="v">${fmtRp(s.biayaLayanan)}</span></div>
+        <div class="kv"><span class="k">Total tebusan</span><span class="v" style="color:var(--gold)">${fmtRp(s.total)}</span></div>
+        ${taksir > 0 && pk > plafon ? `<p class="note warn mb-0"><i class="bi bi-exclamation-triangle-fill me-1"></i>Melebihi plafon 80% taksir.</p>` : ''}`;
+    } catch (e) {
+      el.innerHTML = `<p class="note warn mb-0">${esc(e.message)}</p>`;
+    }
+  };
+  pendingGadai.forEach((l) => {
+    loadGSim(l);
+    ['gt-', 'gp-', 'gtn-'].forEach((pre) => {
+      $('#' + pre + l.id).addEventListener('input', () => {
+        clearTimeout(gsimTimers[l.id]);
+        gsimTimers[l.id] = setTimeout(() => loadGSim(l), 350);
+      });
+    });
+  });
+  main.querySelectorAll('[data-okg]').forEach((b) => b.addEventListener('click', async () => {
+    const id = b.dataset.okg;
+    try {
+      await api('/api/loan-action', 'POST', {
+        action: 'decide', loanId: id, approve: true,
+        taksirAdmin: Number($('#gt-' + id).value),
+        pokokDisetujui: Number($('#gp-' + id).value),
+        tenorHari: Number($('#gtn-' + id).value),
+      });
+      toast('Gadai disetujui. Menunggu barang diserahkan.');
+      go('pengajuan');
+    } catch (e) { toast(e.message, true); }
+  }));
+  main.querySelectorAll('[data-nog]').forEach((b) => b.addEventListener('click', async () => {
+    try {
+      await api('/api/loan-action', 'POST', { action: 'decide', loanId: b.dataset.nog, approve: false });
+      toast('Pengajuan gadai ditolak.');
+      go('pengajuan');
+    } catch (e) { toast(e.message, true); }
+  }));
+  main.querySelectorAll('[data-terima]').forEach((b) => b.addEventListener('click', async () => {
+    if (!confirm('Barang fisik sudah diterima? Dana akan dicairkan dan tagihan mulai berjalan.')) return;
+    try {
+      await api('/api/loan-action', 'POST', { action: 'terima-barang', loanId: b.dataset.terima });
+      toast('Barang diterima. Dana cair.');
+      go('pengajuan');
+    } catch (e) { toast(e.message, true); }
+  }));
+  main.querySelectorAll('[data-serahkan]').forEach((b) => b.addEventListener('click', async () => {
+    if (!confirm('Barang sudah dikembalikan ke peminjam?')) return;
+    try {
+      await api('/api/loan-action', 'POST', { action: 'serahkan-barang', loanId: b.dataset.serahkan });
+      toast('Barang dicatat sudah dikembalikan.');
+      go('pengajuan');
+    } catch (e) { toast(e.message, true); }
   }));
 }
 
@@ -1226,7 +1486,7 @@ async function vBroadcast() {
 
 const VIEWS = {
   login: vLogin, register: vRegister,
-  bDash: vBDash, ajukan: vAjukan, bayar: vBayar, riwayat: vRiwayat, akun: vAkun, notif: vNotif,
+  bDash: vBDash, ajukan: vAjukan, gadai: vGadai, bayar: vBayar, riwayat: vRiwayat, akun: vAkun, notif: vNotif,
   aDash: vADash, pengajuan: vPengajuan, klaim: vKlaim, peminjam: vPeminjam, verifikasi: vVerifikasi, broadcast: vBroadcast, audit: vAudit, pengaturan: vPengaturan,
 };
 

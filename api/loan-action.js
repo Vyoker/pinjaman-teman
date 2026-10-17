@@ -28,6 +28,32 @@ async function decide(res, loan, body, actor) {
   if (!Number.isInteger(tn) || tn < MIN_TENOR || tn > maxTenor) {
     return send(res, 400, { ok: false, error: `Tenor harus ${MIN_TENOR}-${maxTenor} hari (maks rank peminjam).` });
   }
+  // --- GADAI: approve = taksir + tentukan plafon, barang belum diterima ---
+  if ((loan.jenis || 'tunai') === 'gadai') {
+    const taksir = Number(body.taksirAdmin);
+    if (!Number.isInteger(taksir) || taksir <= 0) {
+      return send(res, 400, { ok: false, error: 'Nilai taksir admin tidak valid.' });
+    }
+    const pkSetuju = Number(body.pokokDisetujui);
+    const plafon = Math.floor(taksir * 0.8);
+    if (!Number.isInteger(pkSetuju) || pkSetuju <= 0) {
+      return send(res, 400, { ok: false, error: 'Jumlah disetujui tidak valid.' });
+    }
+    if (pkSetuju > plafon) {
+      return send(res, 400, { ok: false, error: `Maksimal 80% dari taksir (${formatRp(plafon)}).` });
+    }
+    const nowG = Date.now();
+    loan.pokok = pkSetuju;
+    loan.tenorHari = tn;
+    loan.barang.taksirAdmin = taksir;
+    loan.barang.statusTitip = 'menunggu';
+    loan.status = 'disetujui'; // menunggu barang fisik diserahkan
+    loan.approvedAt = new Date(nowG).toISOString();
+    await setJSON('loan:' + loan.id, loan);
+    await audit('setujui-gadai', actor, `${loan.id} (${loan.borrowerName}): ${loan.barang.nama}, taksir ${formatRp(taksir)}, disetujui ${formatRp(pkSetuju)}, tenor ${tn} hari.`);
+    await notifyBorrower(loan, `Pengajuan gadai "${loan.barang.nama}" DISETUJUI: plafon ${formatRp(pkSetuju)} (taksir ${formatRp(taksir)}), tenor ${tn} hari. Serahkan barang fisik ke admin untuk pencairan dana.`, 'gadai-disetujui');
+    return send(res, 200, { ok: true, loan });
+  }
   const sim = calcLoan(loan.pokok, tn, loan.metode, maxTenor);
   const now = Date.now();
   loan.tenorHari = tn;
@@ -54,17 +80,22 @@ async function decide(res, loan, body, actor) {
 }
 
 async function cancel(res, loan, actor) {
-  if (loan.status !== 'berjalan') {
-    return send(res, 400, { ok: false, error: 'Hanya pinjaman berjalan yang bisa dibatalkan.' });
+  // Gadai yang disetujui tapi barang belum diterima juga bisa dibatalkan
+  const gadaiPending = (loan.jenis || 'tunai') === 'gadai' && loan.status === 'disetujui';
+  if (!gadaiPending) {
+    if (loan.status !== 'berjalan') {
+      return send(res, 400, { ok: false, error: 'Hanya pinjaman berjalan yang bisa dibatalkan.' });
+    }
+    if (loan.schedule.some((s) => s.status !== 'belum')) {
+      return send(res, 400, { ok: false, error: 'Tidak bisa dibatalkan: sudah ada pembayaran/laporan.' });
+    }
   }
-  if (loan.schedule.some((s) => s.status !== 'belum')) {
-    return send(res, 400, { ok: false, error: 'Tidak bisa dibatalkan: sudah ada pembayaran/laporan.' });
-  }
+  const wasBerjalan = loan.status === 'berjalan';
   loan.status = 'dibatalkan';
   loan.cancelledAt = new Date().toISOString();
   await setJSON('loan:' + loan.id, loan);
   const borrower = await getJSON('user:' + loan.borrowerPhone);
-  if (borrower) {
+  if (borrower && wasBerjalan) {
     const stats = ensureStats(borrower);
     stats.totalPinjam = Math.max(0, stats.totalPinjam - loan.pokok);
     await setJSON('user:' + loan.borrowerPhone, borrower);
@@ -121,6 +152,69 @@ async function manualPay(res, loan, body, actor) {
   return send(res, 200, { ok: true, loan });
 }
 
+/** Notifikasi in-app ke peminjam (dipakai aksi gadai & manual-pay). */
+async function notifyBorrower(loan, message, kind) {
+  const id = await nextId('notif');
+  await setJSON('notif:' + id, {
+    id, to: loan.borrowerPhone, targetName: loan.borrowerName,
+    message, createdAt: new Date().toISOString(), kind,
+  });
+  const ids = (await getJSON('idx:notifs')) || [];
+  ids.push(id);
+  await setJSON('idx:notifs', ids);
+}
+
+/* ============ GADAI: TERIMA BARANG (v2.1) ============
+ * Admin mengonfirmasi barang fisik sudah diterima -> gadai berjalan, dana cair.
+ */
+async function terimaBarang(res, loan, actor) {
+  if ((loan.jenis || 'tunai') !== 'gadai') return send(res, 400, { ok: false, error: 'Khusus gadai.' });
+  if (loan.status !== 'disetujui') return send(res, 400, { ok: false, error: 'Gadai belum disetujui / sudah berjalan.' });
+  const borrower = await getJSON('user:' + loan.borrowerPhone);
+  const maxTenor = maxTenorFor((borrower && borrower.stats && borrower.stats.payments) || 0);
+  const sim = calcLoan(loan.pokok, loan.tenorHari, loan.metode, maxTenor);
+  const now = Date.now();
+  loan.nCicilan = sim.nCicilan;
+  loan.bunga = sim.bunga;
+  loan.biayaLayanan = sim.biayaLayanan;
+  loan.total = sim.total;
+  loan.schedule = sim.schedule.map((s) => ({
+    ...s,
+    dueDate: new Date(now + s.dueInDays * DAY).toISOString().slice(0, 10),
+    status: 'belum',
+    paidAt: null,
+    payMethod: null,
+    claimId: null,
+  }));
+  loan.status = 'berjalan';
+  loan.disbursedAt = new Date(now).toISOString();
+  loan.barang.statusTitip = 'dititipkan';
+  await setJSON('loan:' + loan.id, loan);
+  if (borrower) {
+    ensureStats(borrower).totalPinjam += loan.pokok;
+    await setJSON('user:' + loan.borrowerPhone, borrower);
+  }
+  await audit('terima-barang', actor, `${loan.id} (${loan.borrowerName}): "${loan.barang.nama}" diterima, dana ${formatRp(loan.pokok)} cair.`);
+  await notifyBorrower(loan, `Barang "${loan.barang.nama}" sudah diterima admin. Dana gadai ${formatRp(loan.pokok)} cair — total tebusan ${formatRp(loan.total)} (${loan.tenorHari} hari).`, 'gadai-cair');
+  return send(res, 200, { ok: true, loan });
+}
+
+/* ============ GADAI: SERAHKAN BARANG (v2.1) ============
+ * Setelah gadai lunas, admin mengembalikan barang fisik ke peminjam.
+ */
+async function serahkanBarang(res, loan, actor) {
+  if ((loan.jenis || 'tunai') !== 'gadai') return send(res, 400, { ok: false, error: 'Khusus gadai.' });
+  if (loan.status !== 'lunas') return send(res, 400, { ok: false, error: 'Gadai belum lunas.' });
+  if (!loan.barang || loan.barang.statusTitip !== 'dititipkan') {
+    return send(res, 400, { ok: false, error: 'Barang sudah dikembalikan.' });
+  }
+  loan.barang.statusTitip = 'dikembalikan';
+  await setJSON('loan:' + loan.id, loan);
+  await audit('serahkan-barang', actor, `${loan.id} (${loan.borrowerName}): "${loan.barang.nama}" dikembalikan (lunas).`);
+  await notifyBorrower(loan, `Gadai "${loan.barang.nama}" LUNAS. Barang sudah bisa diambil kembali. Terima kasih.`, 'gadai-kembali');
+  return send(res, 200, { ok: true, loan });
+}
+
 module.exports = requireAuth(async (req, res) => {
   if (req.method !== 'POST') return send(res, 405, { ok: false, error: 'Method tidak didukung.' });
   try {
@@ -131,6 +225,8 @@ module.exports = requireAuth(async (req, res) => {
     if (action === 'decide') return decide(res, loan, body, req.session.phone);
     if (action === 'cancel') return cancel(res, loan, req.session.phone);
     if (action === 'manual-pay') return manualPay(res, loan, body, req.session.phone);
+    if (action === 'terima-barang') return terimaBarang(res, loan, req.session.phone);
+    if (action === 'serahkan-barang') return serahkanBarang(res, loan, req.session.phone);
     return send(res, 400, { ok: false, error: 'Aksi tidak dikenal.' });
   } catch (e) {
     return send(res, 400, { ok: false, error: e.message });

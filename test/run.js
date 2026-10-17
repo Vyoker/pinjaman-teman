@@ -611,6 +611,77 @@ function ok(cond, label) {
   r = await call('../api/borrowers', { method: 'POST', headers: auth(tA), body: { action: 'logout-approve', phone: '081900000008' } });
   ok(r.status === 400, 'approve permintaan yang sama dua kali ditolak');
 
+  // ============ v2.1: gadai barang ============
+  r = await call('../api/auth', { method: 'POST', body: { action: 'register', name: 'Joko', phone: '081900000009', password: 'joko1234' } });
+  ok(r.json.ok, 'registrasi Joko');
+  r = await call('../api/borrowers', { method: 'POST', headers: auth(tA), body: { phone: '081900000009', approve: true, limit: 500000 } });
+  ok(r.json.ok, 'admin setujui Joko');
+  const tJ = (await call('../api/auth', { method: 'POST', body: { action: 'login', phone: '081900000009', password: 'joko1234' } })).json.token;
+  r = await call('../api/profile', { method: 'POST', headers: auth(tJ), body: { action: 'pencairan', metode: 'dana', nomor: '081533334444', atasNama: 'Joko Prasetyo' } });
+  assert.ok(r.json.ok, 'Joko isi data pencairan');
+  const barangJ = { nama: 'Laptop ASUS', deskripsi: 'Mulus, lengkap charger', foto: PROOF };
+  // tanpa foto -> 400
+  r = await call('../api/loans', { method: 'POST', headers: auth(tJ), body: { jenis: 'gadai', pokok: 700000, tenorHari: 20, metode: 'lunas', barang: { nama: 'Laptop ASUS' } } });
+  ok(r.status === 400 && /Foto/i.test(r.json.error), 'gadai tanpa foto ditolak');
+  // pengajuan ok
+  r = await call('../api/loans', { method: 'POST', headers: auth(tJ), body: { jenis: 'gadai', pokok: 700000, tenorHari: 20, metode: 'lunas', barang: barangJ } });
+  ok(r.json.ok && r.json.loan.jenis === 'gadai', 'pengajuan gadai diterima');
+  ok(r.json.loan.status === 'diajukan' && r.json.loan.barang.statusTitip === 'diajukan', 'status diajukan, barang diajukan');
+  const loanG1 = r.json.loan.id;
+  // gadai kedua saat masih aktif -> 400
+  r = await call('../api/loans', { method: 'POST', headers: auth(tJ), body: { jenis: 'gadai', pokok: 100000, tenorHari: 15, metode: 'lunas', barang: barangJ } });
+  ok(r.status === 400 && /gadai aktif/i.test(r.json.error), 'gadai kedua saat aktif ditolak');
+  // slot terpisah: pinjaman tunai tetap bisa diajukan
+  r = await call('../api/loans', { method: 'POST', headers: auth(tJ), body: { pokok: 100000, tenorHari: 15, metode: 'lunas' } });
+  ok(r.json.ok && (r.json.loan.jenis || 'tunai') === 'tunai', 'pinjaman tunai bisa diajukan bersamaan gadai');
+  // admin setujui: taksir invalid -> 400
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId: loanG1, approve: true, tenorHari: 20 } });
+  ok(r.status === 400 && /taksir/i.test(r.json.error), 'approve gadai tanpa taksir ditolak');
+  // plafon >80% taksir -> 400
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId: loanG1, approve: true, tenorHari: 20, taksirAdmin: 1000000, pokokDisetujui: 900000 } });
+  ok(r.status === 400 && /80%/i.test(r.json.error), 'plafon >80% taksir ditolak');
+  // setujui ok
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId: loanG1, approve: true, tenorHari: 20, taksirAdmin: 1000000, pokokDisetujui: 800000 } });
+  ok(r.json.ok && r.json.loan.status === 'disetujui', 'gadai disetujui -> menunggu barang');
+  ok(r.json.loan.pokok === 800000 && r.json.loan.barang.taksirAdmin === 1000000, 'pokok & taksir tersimpan');
+  ok(r.json.loan.schedule.length === 0, 'belum ada jadwal sebelum barang diterima');
+  // terima barang -> berjalan
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'terima-barang', loanId: loanG1 } });
+  ok(r.json.ok && r.json.loan.status === 'berjalan', 'barang diterima -> berjalan');
+  const expTotal = 800000 + calc.calcLoan(800000, 20, 'lunas').bunga + 2000;
+  ok(r.json.loan.total === expTotal && r.json.loan.barang.statusTitip === 'dititipkan', `total tebusan ${expTotal}, barang dititipkan`);
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'terima-barang', loanId: loanG1 } });
+  ok(r.status === 400, 'terima barang dua kali ditolak');
+  // notifikasi cair ke peminjam
+  const notifJ = await call('../api/notifications', { method: 'GET', headers: auth(tJ) });
+  ok(notifJ.json.notifications.some((x) => /diterima admin/i.test(x.message)), 'notifikasi barang diterima terkirim');
+  // serahkan sebelum lunas -> 400
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'serahkan-barang', loanId: loanG1 } });
+  ok(r.status === 400 && /belum lunas/i.test(r.json.error), 'serahkan barang sebelum lunas ditolak');
+  // bayar lunas via manual-pay (tunai, 1 tagihan)
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'manual-pay', loanId: loanG1, schedIdx: 0 } });
+  ok(r.json.ok && r.json.loan.status === 'lunas', 'gadai dilunasi via tandai tunai');
+  // serahkan barang
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'serahkan-barang', loanId: loanG1 } });
+  ok(r.json.ok && r.json.loan.barang.statusTitip === 'dikembalikan', 'barang dikembalikan setelah lunas');
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'serahkan-barang', loanId: loanG1 } });
+  ok(r.status === 400, 'serahkan barang dua kali ditolak');
+  const notifJ2 = await call('../api/notifications', { method: 'GET', headers: auth(tJ) });
+  ok(notifJ2.json.notifications.some((x) => /bisa diambil kembali/i.test(x.message)), 'notifikasi barang kembali terkirim');
+  // gadai baru -> setujui -> batalkan saat menunggu barang
+  r = await call('../api/loans', { method: 'POST', headers: auth(tJ), body: { jenis: 'gadai', pokok: 500000, tenorHari: 15, metode: 'lunas', barang: barangJ } });
+  ok(r.json.ok, 'pengajuan gadai kedua diterima');
+  const loanG2 = r.json.loan.id;
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId: loanG2, approve: true, tenorHari: 15, taksirAdmin: 800000, pokokDisetujui: 500000 } });
+  ok(r.json.ok && r.json.loan.status === 'disetujui', 'gadai kedua disetujui');
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'cancel', loanId: loanG2 } });
+  ok(r.json.ok && r.json.loan.status === 'dibatalkan', 'gadai menunggu barang bisa dibatalkan');
+  // audit mencatat aksi gadai
+  r = await call('../api/admin-stats', { method: 'GET', headers: auth(tA), url: '/api/admin-stats?view=audit' });
+  ok(r.json.audit.some((a) => a.action === 'setujui-gadai'), 'audit: setujui-gadai tercatat');
+  ok(r.json.audit.some((a) => a.action === 'terima-barang'), 'audit: terima-barang tercatat');
+  ok(r.json.audit.some((a) => a.action === 'serahkan-barang'), 'audit: serahkan-barang tercatat');
+
   console.log(`\nSEMUA TES LOLOS (${n} asersi)`);
 })().catch((e) => {
   console.error('\nTES GAGAL:', e.message);

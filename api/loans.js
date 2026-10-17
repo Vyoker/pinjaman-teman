@@ -36,9 +36,27 @@ async function listLoans(filter) {
   return out;
 }
 
-async function hasActiveLoan(phone) {
+async function hasActiveLoan(phone, jenis) {
   const loans = await listLoans({ phone });
-  return loans.some((l) => l.status === 'diajukan' || l.status === 'berjalan');
+  return loans.some((l) => (l.jenis || 'tunai') === (jenis || 'tunai') &&
+    ['diajukan', 'disetujui', 'berjalan'].includes(l.status));
+}
+
+/** Validasi data barang gadai dari peminjam. */
+function validateBarang(b) {
+  const nama = String((b && b.nama) || '').trim();
+  const deskripsi = String((b && b.deskripsi) || '').trim().slice(0, 500);
+  const foto = (b && b.foto) || '';
+  if (nama.length < 3 || nama.length > 100) {
+    return { ok: false, error: 'Nama barang 3–100 karakter.' };
+  }
+  if (typeof foto !== 'string' || !/^data:image\/(jpeg|png|webp);base64,/.test(foto)) {
+    return { ok: false, error: 'Foto barang wajib dilampirkan.' };
+  }
+  if (foto.length > 700000) {
+    return { ok: false, error: 'Foto barang terlalu besar (maks ±700KB).' };
+  }
+  return { ok: true, value: { nama, deskripsi, foto, taksirAdmin: null, statusTitip: 'diajukan' } };
 }
 
 module.exports = requireAuth(async (req, res) => {
@@ -62,7 +80,8 @@ module.exports = requireAuth(async (req, res) => {
   if (req.method === 'POST') {
     if (sess.role !== 'borrower') return send(res, 403, { ok: false, error: 'Hanya peminjam.' });
     try {
-      const { pokok, tenorHari, metode } = await readBody(req);
+      const { pokok, tenorHari, metode, jenis, barang: barangIn } = await readBody(req);
+      const isGadai = jenis === 'gadai';
       const pk = Number(pokok);
       const tn = Number(tenorHari);
       if (!Number.isInteger(pk) || pk <= 0) return send(res, 400, { ok: false, error: 'Pokok tidak valid.' });
@@ -75,13 +94,22 @@ module.exports = requireAuth(async (req, res) => {
       if (!Number.isInteger(tn) || tn < MIN_TENOR || tn > maxTenor) {
         return send(res, 400, { ok: false, error: `Tenor harus ${MIN_TENOR}-${maxTenor} hari.` });
       }
-      if (pk > effectiveLimit(user)) return send(res, 400, { ok: false, error: 'Pokok melebihi limit kamu.' });
-      if (await hasActiveLoan(sess.phone)) {
-        return send(res, 400, { ok: false, error: 'Masih ada pinjaman aktif. Selesaikan dulu.' });
+      let barang = null;
+      if (isGadai) {
+        const vb = validateBarang(barangIn);
+        if (!vb.ok) return send(res, 400, { ok: false, error: vb.error });
+        barang = vb.value;
+      }
+      if (!isGadai && pk > effectiveLimit(user)) {
+        return send(res, 400, { ok: false, error: 'Pokok melebihi limit kamu.' });
+      }
+      if (await hasActiveLoan(sess.phone, isGadai ? 'gadai' : 'tunai')) {
+        return send(res, 400, { ok: false, error: isGadai ? 'Masih ada gadai aktif. Selesaikan dulu.' : 'Masih ada pinjaman aktif. Selesaikan dulu.' });
       }
       const id = await nextId('loan');
       const loan = {
         id, borrowerPhone: sess.phone, borrowerName: user.name,
+        jenis: isGadai ? 'gadai' : 'tunai', barang,
         pokok: pk, tenorProposal: tn, tenorHari: null, metode,
         nCicilan: null, bunga: null, biayaLayanan: null, total: null,
         schedule: [], status: 'diajukan',
