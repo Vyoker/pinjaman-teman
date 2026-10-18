@@ -4,7 +4,7 @@
 //   POST (peminjam) { pokok, tenorHari, metode } -> ajukan pinjaman (status 'diajukan')
 const { getJSON, setJSON, nextId } = require('../lib/store');
 const { requireAuth, readBody, send } = require('../lib/auth');
-const { MIN_TENOR, calcLateFee, todayStr, maxTenorFor } = require('../lib/calc');
+const { MIN_TENOR, calcLateFee, todayStr, maxTenorFor, COOLDOWN_MS, cooldownRemaining } = require('../lib/calc');
 const { effectiveLimit } = require('../lib/profile');
 
 async function idxPush(key, val) {
@@ -105,6 +105,14 @@ module.exports = requireAuth(async (req, res) => {
       }
       if (await hasActiveLoan(sess.phone, isGadai ? 'gadai' : 'tunai')) {
         return send(res, 400, { ok: false, error: isGadai ? 'Masih ada gadai aktif. Selesaikan dulu.' : 'Masih ada pinjaman aktif. Selesaikan dulu.' });
+      }
+      // v2.3: jeda 3 hari setelah pelunasan sebelum boleh mengajukan lagi (per jenis)
+      const loansMine = await listLoans({ phone: sess.phone });
+      const sisa = cooldownRemaining(loansMine, isGadai ? 'gadai' : 'tunai');
+      if (sisa > 0) {
+        const bisa = new Date(Date.now() + sisa);
+        const tgl = bisa.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+        return send(res, 400, { ok: false, error: `Baru bisa mengajukan lagi pada ${tgl} (jeda 3 hari setelah pelunasan).` });
       }
       const id = await nextId('loan');
       const loan = {

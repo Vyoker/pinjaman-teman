@@ -105,7 +105,7 @@ module.exports = requireAuth(async (req, res) => {
         item.payMethod = claim.payMethod;
         item.claimId = null;
         item.lateFeePaid = claim.lateFee || 0;
-        if (loan.schedule.every((s) => s.status === 'lunas')) loan.status = 'lunas';
+        if (loan.schedule.every((s) => s.status === 'lunas')) { loan.status = 'lunas'; loan.lunasAt = new Date().toISOString(); }
         // Statistik peminjam (untuk sistem rank)
         const borrower = await getJSON('user:' + loan.borrowerPhone);
         if (borrower) {

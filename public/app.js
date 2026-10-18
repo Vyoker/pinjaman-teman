@@ -1,7 +1,7 @@
 'use strict';
 /* Pinjaman Teman — SPA frontend (Bootstrap 5 + animasi) */
 
-const APP_VERSION = '2.2.0';
+const APP_VERSION = '2.3.0';
 const $ = (s) => document.querySelector(s);
 /** Pasang handler ke semua elemen yang cocok (pengganti pola querySelectorAll berulang). */
 const bindAll = (sel, ev, fn) => document.querySelectorAll(sel).forEach((el) => el.addEventListener(ev, fn));
@@ -19,6 +19,20 @@ function fmtDate(iso) {
   if (!iso) return '-';
   const d = new Date(iso.length <= 10 ? iso + 'T00:00:00' : iso);
   return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+/** v2.3: sisa cooldown (ms) per jenis; 0 bila tidak ada. */
+function cooldownMs(loans, jenis) {
+  const done = loans
+    .filter((l) => (l.jenis || 'tunai') === jenis && l.status === 'lunas' && l.lunasAt)
+    .sort((a, b) => new Date(b.lunasAt) - new Date(a.lunasAt))[0];
+  if (!done) return 0;
+  return Math.max(0, new Date(done.lunasAt).getTime() + 3 * 864e5 - Date.now());
+}
+/** v2.3: kartu pemberitahuan masa jeda setelah pelunasan. */
+function cooldownNote(ms) {
+  const tgl = new Date(Date.now() + ms).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+  return `<div${stagger(0, 'card')}><h3><i class="bi bi-hourglass-split me-2" style="color:var(--gold)"></i>Masa Jeda</h3>
+    <p class="mb-0">Kamu baru saja melunasi. Pengajuan baru bisa dilakukan lagi pada <strong style="color:var(--gold)">${tgl}</strong> (jeda 3 hari setelah pelunasan).</p></div>`;
 }
 function toast(msg, err) {
   const t = $('#toast');
@@ -335,6 +349,9 @@ async function vBDash() {
 let simTimer = null;
 async function vAjukan() {
   const me = await api('/api/me');
+  const { loans } = await api('/api/loans');
+  const cd = cooldownMs(loans, 'tunai'); // v2.3: jeda 3 hari setelah pelunasan
+  if (cd > 0) { main.innerHTML = cooldownNote(cd); return; }
   const eff = Math.floor(((me.effectiveLimit ?? me.limit) || 0) / 1000) * 1000;
   const maxT = me.maxTenor || 30;
   const defPokok = eff >= 500000 ? 500000 : Math.max(eff, 1000);
@@ -445,6 +462,8 @@ async function vGadai() {
   }
 
   // Form pengajuan baru
+  const cd = cooldownMs(loans, 'gadai'); // v2.3: jeda 3 hari setelah pelunasan
+  if (cd > 0) { main.innerHTML = cooldownNote(cd); return; }
   const me = await api('/api/me');
   const maxT = me.maxTenor || 30;
   main.innerHTML = `

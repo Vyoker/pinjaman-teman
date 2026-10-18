@@ -88,6 +88,11 @@ Total tagihan = Pokok + (Pokok x 0,2% x tenor hari) + Rp 2.000 (biaya layanan)
   WAJIB saat "Barang diterima" dan "Barang dikembalikan" (bukti
   sengketa); admin bisa menulis alasan penolakan yang terlihat oleh
   peminjam di kartu pengajuannya.
+- **v2.3 (jeda setelah pelunasan)**: setelah pinjaman/gadai lunas,
+  peminjam harus menunggu 3 hari sebelum bisa mengajukan lagi
+  (per jenis: pelunasan tunai tidak menghalangi pengajuan gadai).
+  Berlaku untuk pelunasan via konfirmasi klaim maupun tandai tunai;
+  menu Ajukan/Gadai menampilkan tanggal kapan boleh mengajukan lagi.
 
 ## Arsitektur
 

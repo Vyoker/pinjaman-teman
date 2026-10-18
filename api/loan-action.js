@@ -129,7 +129,7 @@ async function manualPay(res, loan, body, actor) {
   item.claimId = null;
   item.lateFeePaid = lateFee;
   item.manualNote = note || 'Tunai ke admin';
-  if (loan.schedule.every((s) => s.status === 'lunas')) loan.status = 'lunas';
+  if (loan.schedule.every((s) => s.status === 'lunas')) { loan.status = 'lunas'; loan.lunasAt = new Date().toISOString(); }
   // Statistik peminjam (untuk sistem rank) — sama seperti konfirmasi klaim
   const borrower = await getJSON('user:' + loan.borrowerPhone);
   if (borrower) {
