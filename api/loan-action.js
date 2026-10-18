@@ -15,8 +15,10 @@ async function decide(res, loan, body, actor) {
   if (loan.status !== 'diajukan') return send(res, 400, { ok: false, error: 'Pinjaman sudah diproses.' });
   if (!body.approve) {
     loan.status = 'ditolak';
+    const alasan = String(body.alasan || '').trim().slice(0, 300);
+    loan.alasanTolak = alasan || null;
     await setJSON('loan:' + loan.id, loan);
-    await audit('tolak-pinjaman', actor, `${loan.id} (${loan.borrowerName}, ${formatRp(loan.pokok)}) ditolak.`);
+    await audit('tolak-pinjaman', actor, `${loan.id} (${loan.borrowerName}, ${formatRp(loan.pokok)}) ditolak.${alasan ? ' Alasan: ' + alasan : ''}`);
     return send(res, 200, { ok: true, loan });
   }
   const borrower = await getJSON('user:' + loan.borrowerPhone);
@@ -164,12 +166,22 @@ async function notifyBorrower(loan, message, kind) {
   await setJSON('idx:notifs', ids);
 }
 
+/** Validasi foto serah-terima barang (dataURL, maks ±700KB). */
+function validFotoSerah(foto) {
+  return typeof foto === 'string'
+    && /^data:image\/(jpeg|png|webp);base64,/.test(foto)
+    && foto.length <= 700000;
+}
+
 /* ============ GADAI: TERIMA BARANG (v2.1) ============
  * Admin mengonfirmasi barang fisik sudah diterima -> gadai berjalan, dana cair.
  */
-async function terimaBarang(res, loan, actor) {
+async function terimaBarang(res, loan, body, actor) {
   if ((loan.jenis || 'tunai') !== 'gadai') return send(res, 400, { ok: false, error: 'Khusus gadai.' });
   if (loan.status !== 'disetujui') return send(res, 400, { ok: false, error: 'Gadai belum disetujui / sudah berjalan.' });
+  if (!validFotoSerah(body.foto)) {
+    return send(res, 400, { ok: false, error: 'Foto kondisi barang saat diterima wajib dilampirkan.' });
+  }
   const borrower = await getJSON('user:' + loan.borrowerPhone);
   const maxTenor = maxTenorFor((borrower && borrower.stats && borrower.stats.payments) || 0);
   const sim = calcLoan(loan.pokok, loan.tenorHari, loan.metode, maxTenor);
@@ -189,6 +201,8 @@ async function terimaBarang(res, loan, actor) {
   loan.status = 'berjalan';
   loan.disbursedAt = new Date(now).toISOString();
   loan.barang.statusTitip = 'dititipkan';
+  loan.barang.fotoTerima = body.foto;
+  loan.barang.tglTerima = new Date(now).toISOString();
   await setJSON('loan:' + loan.id, loan);
   if (borrower) {
     ensureStats(borrower).totalPinjam += loan.pokok;
@@ -202,13 +216,18 @@ async function terimaBarang(res, loan, actor) {
 /* ============ GADAI: SERAHKAN BARANG (v2.1) ============
  * Setelah gadai lunas, admin mengembalikan barang fisik ke peminjam.
  */
-async function serahkanBarang(res, loan, actor) {
+async function serahkanBarang(res, loan, body, actor) {
   if ((loan.jenis || 'tunai') !== 'gadai') return send(res, 400, { ok: false, error: 'Khusus gadai.' });
   if (loan.status !== 'lunas') return send(res, 400, { ok: false, error: 'Gadai belum lunas.' });
   if (!loan.barang || loan.barang.statusTitip !== 'dititipkan') {
     return send(res, 400, { ok: false, error: 'Barang sudah dikembalikan.' });
   }
+  if (!validFotoSerah(body.foto)) {
+    return send(res, 400, { ok: false, error: 'Foto kondisi barang saat dikembalikan wajib dilampirkan.' });
+  }
   loan.barang.statusTitip = 'dikembalikan';
+  loan.barang.fotoKembali = body.foto;
+  loan.barang.tglKembali = new Date().toISOString();
   await setJSON('loan:' + loan.id, loan);
   await audit('serahkan-barang', actor, `${loan.id} (${loan.borrowerName}): "${loan.barang.nama}" dikembalikan (lunas).`);
   await notifyBorrower(loan, `Gadai "${loan.barang.nama}" LUNAS. Barang sudah bisa diambil kembali. Terima kasih.`, 'gadai-kembali');
@@ -225,8 +244,8 @@ module.exports = requireAuth(async (req, res) => {
     if (action === 'decide') return decide(res, loan, body, req.session.phone);
     if (action === 'cancel') return cancel(res, loan, req.session.phone);
     if (action === 'manual-pay') return manualPay(res, loan, body, req.session.phone);
-    if (action === 'terima-barang') return terimaBarang(res, loan, req.session.phone);
-    if (action === 'serahkan-barang') return serahkanBarang(res, loan, req.session.phone);
+    if (action === 'terima-barang') return terimaBarang(res, loan, body, req.session.phone);
+    if (action === 'serahkan-barang') return serahkanBarang(res, loan, body, req.session.phone);
     return send(res, 400, { ok: false, error: 'Aksi tidak dikenal.' });
   } catch (e) {
     return send(res, 400, { ok: false, error: e.message });

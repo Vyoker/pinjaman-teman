@@ -646,11 +646,12 @@ function ok(cond, label) {
   ok(r.json.loan.pokok === 800000 && r.json.loan.barang.taksirAdmin === 1000000, 'pokok & taksir tersimpan');
   ok(r.json.loan.schedule.length === 0, 'belum ada jadwal sebelum barang diterima');
   // terima barang -> berjalan
-  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'terima-barang', loanId: loanG1 } });
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'terima-barang', loanId: loanG1, foto: PROOF } });
   ok(r.json.ok && r.json.loan.status === 'berjalan', 'barang diterima -> berjalan');
   const expTotal = 800000 + calc.calcLoan(800000, 20, 'lunas').bunga + 2000;
   ok(r.json.loan.total === expTotal && r.json.loan.barang.statusTitip === 'dititipkan', `total tebusan ${expTotal}, barang dititipkan`);
-  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'terima-barang', loanId: loanG1 } });
+  ok(r.json.loan.barang.fotoTerima === PROOF, 'foto terima tersimpan');
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'terima-barang', loanId: loanG1, foto: PROOF } });
   ok(r.status === 400, 'terima barang dua kali ditolak');
   // notifikasi cair ke peminjam
   const notifJ = await call('../api/notifications', { method: 'GET', headers: auth(tJ) });
@@ -662,9 +663,10 @@ function ok(cond, label) {
   r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'manual-pay', loanId: loanG1, schedIdx: 0 } });
   ok(r.json.ok && r.json.loan.status === 'lunas', 'gadai dilunasi via tandai tunai');
   // serahkan barang
-  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'serahkan-barang', loanId: loanG1 } });
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'serahkan-barang', loanId: loanG1, foto: PROOF } });
   ok(r.json.ok && r.json.loan.barang.statusTitip === 'dikembalikan', 'barang dikembalikan setelah lunas');
-  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'serahkan-barang', loanId: loanG1 } });
+  ok(r.json.loan.barang.fotoKembali === PROOF, 'foto kembali tersimpan');
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'serahkan-barang', loanId: loanG1, foto: PROOF } });
   ok(r.status === 400, 'serahkan barang dua kali ditolak');
   const notifJ2 = await call('../api/notifications', { method: 'GET', headers: auth(tJ) });
   ok(notifJ2.json.notifications.some((x) => /bisa diambil kembali/i.test(x.message)), 'notifikasi barang kembali terkirim');
@@ -681,6 +683,41 @@ function ok(cond, label) {
   ok(r.json.audit.some((a) => a.action === 'setujui-gadai'), 'audit: setujui-gadai tercatat');
   ok(r.json.audit.some((a) => a.action === 'terima-barang'), 'audit: terima-barang tercatat');
   ok(r.json.audit.some((a) => a.action === 'serahkan-barang'), 'audit: serahkan-barang tercatat');
+
+  // ============ v2.2: foto serah-terima wajib + alasan tolak ============
+  // gadai baru untuk uji foto wajib
+  r = await call('../api/loans', { method: 'POST', headers: auth(tJ), body: { jenis: 'gadai', pokok: 400000, tenorHari: 15, metode: 'lunas', barang: barangJ } });
+  ok(r.json.ok, 'pengajuan gadai v2.2 diterima');
+  const loanG3 = r.json.loan.id;
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId: loanG3, approve: true, tenorHari: 15, taksirAdmin: 700000, pokokDisetujui: 400000 } });
+  ok(r.json.ok, 'gadai v2.2 disetujui');
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'terima-barang', loanId: loanG3 } });
+  ok(r.status === 400 && /Foto/i.test(r.json.error), 'terima barang tanpa foto ditolak');
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'terima-barang', loanId: loanG3, foto: 'bukan-foto' } });
+  ok(r.status === 400, 'terima barang dengan foto invalid ditolak');
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'terima-barang', loanId: loanG3, foto: PROOF } });
+  ok(r.json.ok && r.json.loan.barang.fotoTerima === PROOF, 'terima barang dengan foto ok');
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'manual-pay', loanId: loanG3, schedIdx: 0 } });
+  ok(r.json.ok && r.json.loan.status === 'lunas', 'gadai v2.2 lunas');
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'serahkan-barang', loanId: loanG3 } });
+  ok(r.status === 400 && /Foto/i.test(r.json.error), 'serahkan barang tanpa foto ditolak');
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'serahkan-barang', loanId: loanG3, foto: PROOF } });
+  ok(r.json.ok && r.json.loan.barang.fotoKembali === PROOF, 'serahkan barang dengan foto ok');
+  // inventaris: admin bisa lihat data barang titipan/riwayat via /api/loans
+  const allA = await call('../api/loans', { method: 'GET', headers: auth(tA) });
+  const invGadai = allA.json.loans.filter((l) => (l.jenis || 'tunai') === 'gadai' && l.barang);
+  ok(invGadai.length >= 3, 'inventaris: data gadai tersedia untuk admin');
+  ok(invGadai.every((l) => l.barang.nama && l.barang.statusTitip), 'inventaris: tiap barang punya nama & status titip');
+  // tolak dengan alasan -> terlihat peminjam
+  r = await call('../api/loans', { method: 'POST', headers: auth(tJ), body: { jenis: 'gadai', pokok: 300000, tenorHari: 15, metode: 'lunas', barang: barangJ } });
+  ok(r.json.ok, 'pengajuan gadai untuk uji tolak diterima');
+  const loanG4 = r.json.loan.id;
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId: loanG4, approve: false, alasan: 'Stok gudang penuh, coba lagi bulan depan' } });
+  ok(r.json.ok && r.json.loan.status === 'ditolak', 'gadai ditolak');
+  ok(r.json.loan.alasanTolak === 'Stok gudang penuh, coba lagi bulan depan', 'alasan tolak tersimpan');
+  const loansJ = await call('../api/loans', { method: 'GET', headers: auth(tJ) });
+  const tolakJ = loansJ.json.loans.find((l) => l.id === loanG4);
+  ok(tolakJ && tolakJ.alasanTolak === 'Stok gudang penuh, coba lagi bulan depan', 'alasan tolak terlihat oleh peminjam');
 
   console.log(`\nSEMUA TES LOLOS (${n} asersi)`);
 })().catch((e) => {

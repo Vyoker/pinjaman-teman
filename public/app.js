@@ -1,7 +1,7 @@
 'use strict';
 /* Pinjaman Teman — SPA frontend (Bootstrap 5 + animasi) */
 
-const APP_VERSION = '2.1.0';
+const APP_VERSION = '2.2.0';
 const $ = (s) => document.querySelector(s);
 /** Pasang handler ke semua elemen yang cocok (pengganti pola querySelectorAll berulang). */
 const bindAll = (sel, ev, fn) => document.querySelectorAll(sel).forEach((el) => el.addEventListener(ev, fn));
@@ -101,6 +101,7 @@ const NAVS = {
     ['aDash', 'Dashboard', 'bi-speedometer2'],
     ['pengajuan', 'Pengajuan', 'bi-inbox-fill'],
     ['klaim', 'Pembayaran', 'bi-arrow-left-right'],
+    ['inventaris', 'Inventaris', 'bi-boxes'],
     ['peminjam', 'Peminjam', 'bi-people-fill'],
     ['verifikasi', 'Verifikasi', 'bi-patch-check-fill'],
     ['broadcast', 'Broadcast', 'bi-megaphone-fill'],
@@ -243,6 +244,7 @@ function loanCard(l, showSchedule, i) {
       <div class="kv"><span class="k">Metode</span><span class="v">${l.metode === 'cicilan' ? 'Cicilan' : 'Sekaligus'}</span></div>
       ${l.total ? `<div class="kv"><span class="k">Total tagihan</span><span class="v big">${fmtRp(l.total)}</span></div>` : ''}
       <div class="kv"><span class="k">Diajukan</span><span class="v">${fmtDate(l.createdAt)}</span></div>
+      ${l.status === 'ditolak' && l.alasanTolak ? `<p class="note warn mt-2 mb-0"><i class="bi bi-info-circle-fill me-1"></i>Alasan admin: ${esc(l.alasanTolak)}</p>` : ''}
       ${sched}
     </div>`;
 }
@@ -854,13 +856,7 @@ async function vPengajuan() {
       go('pengajuan');
     } catch (e) { toast(e.message, true); }
   }));
-  main.querySelectorAll('[data-no]').forEach((b) => b.addEventListener('click', async () => {
-    try {
-      await api('/api/loan-action', 'POST', { action: 'decide', loanId: b.dataset.no, approve: false });
-      toast('Pengajuan ditolak.');
-      go('pengajuan');
-    } catch (e) { toast(e.message, true); }
-  }));
+  main.querySelectorAll('[data-no]').forEach((b) => b.addEventListener('click', () => showTolakModal(b.dataset.no)));
   main.querySelectorAll('[data-cancel]').forEach((b) => b.addEventListener('click', async () => {
     if (!confirm('Batalkan pinjaman ini? Status menjadi dibatalkan dan tidak bisa dikembalikan.')) return;
     try {
@@ -923,29 +919,9 @@ async function vPengajuan() {
       go('pengajuan');
     } catch (e) { toast(e.message, true); }
   }));
-  main.querySelectorAll('[data-nog]').forEach((b) => b.addEventListener('click', async () => {
-    try {
-      await api('/api/loan-action', 'POST', { action: 'decide', loanId: b.dataset.nog, approve: false });
-      toast('Pengajuan gadai ditolak.');
-      go('pengajuan');
-    } catch (e) { toast(e.message, true); }
-  }));
-  main.querySelectorAll('[data-terima]').forEach((b) => b.addEventListener('click', async () => {
-    if (!confirm('Barang fisik sudah diterima? Dana akan dicairkan dan tagihan mulai berjalan.')) return;
-    try {
-      await api('/api/loan-action', 'POST', { action: 'terima-barang', loanId: b.dataset.terima });
-      toast('Barang diterima. Dana cair.');
-      go('pengajuan');
-    } catch (e) { toast(e.message, true); }
-  }));
-  main.querySelectorAll('[data-serahkan]').forEach((b) => b.addEventListener('click', async () => {
-    if (!confirm('Barang sudah dikembalikan ke peminjam?')) return;
-    try {
-      await api('/api/loan-action', 'POST', { action: 'serahkan-barang', loanId: b.dataset.serahkan });
-      toast('Barang dicatat sudah dikembalikan.');
-      go('pengajuan');
-    } catch (e) { toast(e.message, true); }
-  }));
+  main.querySelectorAll('[data-nog]').forEach((b) => b.addEventListener('click', () => showTolakModal(b.dataset.nog)));
+  main.querySelectorAll('[data-terima]').forEach((b) => b.addEventListener('click', () => showSerahModal(b.dataset.terima, 'terima')));
+  main.querySelectorAll('[data-serahkan]').forEach((b) => b.addEventListener('click', () => showSerahModal(b.dataset.serahkan, 'serahkan')));
 }
 
 async function vKlaim() {
@@ -984,6 +960,73 @@ async function vKlaim() {
       go('klaim');
     } catch (e) { toast(e.message, true); }
   }));
+}
+
+/* ============ INVENTARIS BARANG TITIPAN (v2.2) ============ */
+async function vInventaris() {
+  const { loans } = await api('/api/loans');
+  const gadai = loans.filter((l) => (l.jenis || 'tunai') === 'gadai' && l.barang);
+  const aktif = gadai.filter((l) => l.barang.statusTitip === 'dititipkan');
+  const riwayat = gadai.filter((l) => l.barang.statusTitip !== 'dititipkan');
+  const card = (l, i) => {
+    const b = l.barang;
+    return `
+    <div${stagger(i, 'card')}>
+      <div class="d-flex gap-3">
+        ${b.foto ? `<img src="${b.foto}" class="proof-thumb" style="width:84px;height:84px;object-fit:cover" alt="Barang">` : ''}
+        <div class="flex-fill">
+          <div class="d-flex justify-content-between align-items-center">
+            <strong>${esc(b.nama || '-')}</strong>${badge(l.status)}
+          </div>
+          <div class="muted" style="font-size:12px">${esc(l.borrowerName)} &middot; ${l.id}</div>
+          ${b.deskripsi ? `<div class="muted" style="font-size:12px">${esc(b.deskripsi)}</div>` : ''}
+        </div>
+      </div>
+      <div class="kv mt-2"><span class="k">Taksir admin</span><span class="v">${b.taksirAdmin ? fmtRp(b.taksirAdmin) : '-'}</span></div>
+      <div class="kv"><span class="k">Plafon</span><span class="v">${fmtRp(l.pokok)}</span></div>
+      <div class="kv"><span class="k">Dititipkan sejak</span><span class="v">${b.tglTerima ? fmtDate(b.tglTerima) : '-'}</span></div>
+      ${b.statusTitip === 'dikembalikan' ? `<div class="kv"><span class="k">Dikembalikan</span><span class="v">${b.tglKembali ? fmtDate(b.tglKembali) : '-'}</span></div>` : ''}
+      <div class="d-flex gap-2 mt-2 flex-wrap">
+        ${b.fotoTerima ? `<button class="btn btn-outline-light btn-sm" data-invfoto="${l.id}:terima"><i class="bi bi-camera-fill me-1"></i>Foto terima</button>` : ''}
+        ${b.fotoKembali ? `<button class="btn btn-outline-light btn-sm" data-invfoto="${l.id}:kembali"><i class="bi bi-camera-fill me-1"></i>Foto kembali</button>` : ''}
+      </div>
+    </div>`;
+  };
+  main.innerHTML = `
+    <div class="section-title">Dititipkan sekarang (${aktif.length})</div>
+    ${aktif.map(card).join('') || `<div class="card anim-in"><p class="muted mb-0"><i class="bi bi-inbox me-2"></i>Tidak ada barang titipan.</p></div>`}
+    <div class="section-title">Riwayat barang (${riwayat.length})</div>
+    ${riwayat.map(card).join('') || `<div class="card anim-in"><p class="muted mb-0"><i class="bi bi-inbox me-2"></i>Belum ada riwayat.</p></div>`}`;
+  const byId = Object.fromEntries(gadai.map((l) => [l.id, l]));
+  main.querySelectorAll('[data-invfoto]').forEach((b) => b.addEventListener('click', () => {
+    const [id, kind] = b.dataset.invfoto.split(':');
+    const l = byId[id];
+    const foto = l && l.barang ? (kind === 'terima' ? l.barang.fotoTerima : l.barang.fotoKembali) : null;
+    if (foto) showFotoModal(foto, `Foto ${kind === 'terima' ? 'saat diterima' : 'saat dikembalikan'} — ${l.barang.nama}`);
+  }));
+}
+
+/** Modal perbesar foto (dipakai inventaris & bukti). */
+function showFotoModal(src, title) {
+  let m = $('#fotoModal');
+  if (!m) {
+    document.body.insertAdjacentHTML('beforeend', `
+      <div class="modal fade" id="fotoModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+          <div class="modal-content" style="background:#101a14;border:1px solid #e8c26a55">
+            <div class="modal-header" style="border-color:#ffffff18">
+              <h5 class="modal-title mb-0" id="fotoModalTitle"></h5>
+              <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Tutup"></button>
+            </div>
+            <div class="modal-body text-center"><img id="fotoModalImg" style="max-width:100%;border-radius:8px" alt="Foto"></div>
+          </div>
+        </div>
+      </div>`);
+    m = $('#fotoModal');
+  }
+  $('#fotoModalTitle').textContent = title || 'Foto';
+  $('#fotoModalImg').src = src;
+  bootstrap.Modal.getOrCreateInstance(m).show();
 }
 
 async function vPeminjam() {
@@ -1171,6 +1214,105 @@ function showManualPay(loanId, schedIdx, amount, dueDate) {
       bootstrap.Modal.getInstance(m).hide();
       go('pengajuan');
     } catch (e) { toast(e.message, true); }
+  };
+  bootstrap.Modal.getOrCreateInstance(m).show();
+}
+
+/* ============ MODAL TOLAK (dengan alasan, v2.2) ============ */
+function showTolakModal(loanId) {
+  let m = $('#tolakModal');
+  if (!m) {
+    document.body.insertAdjacentHTML('beforeend', `
+      <div class="modal fade" id="tolakModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+          <div class="modal-content" style="background:#101a14;border:1px solid #e8c26a55">
+            <div class="modal-header" style="border-color:#ffffff18">
+              <h5 class="modal-title mb-0"><i class="bi bi-x-circle me-2"></i>Tolak Pengajuan</h5>
+              <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Tutup"></button>
+            </div>
+            <div class="modal-body">
+              <label class="form-label">Alasan penolakan (terlihat oleh peminjam, opsional)</label>
+              <textarea id="tolakAlasan" class="form-control" rows="3" maxlength="300" placeholder="cth: Limit belum mencukupi, coba lagi bulan depan"></textarea>
+            </div>
+            <div class="modal-footer" style="border-color:#ffffff18">
+              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+              <button type="button" class="btn btn-danger" id="tolakConfirm"><i class="bi bi-x-lg me-1"></i>Tolak</button>
+            </div>
+          </div>
+        </div>
+      </div>`);
+    m = $('#tolakModal');
+  }
+  $('#tolakAlasan').value = '';
+  $('#tolakConfirm').onclick = async () => {
+    try {
+      await api('/api/loan-action', 'POST', { action: 'decide', loanId, approve: false, alasan: $('#tolakAlasan').value });
+      toast('Pengajuan ditolak.');
+      bootstrap.Modal.getInstance(m).hide();
+      go('pengajuan');
+    } catch (e) { toast(e.message, true); }
+  };
+  bootstrap.Modal.getOrCreateInstance(m).show();
+}
+
+/* ============ MODAL SERAH-TERIMA BARANG (foto wajib, v2.2) ============ */
+function showSerahModal(loanId, mode) {
+  const terima = mode === 'terima';
+  let m = $('#serahModal');
+  if (!m) {
+    document.body.insertAdjacentHTML('beforeend', `
+      <div class="modal fade" id="serahModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+          <div class="modal-content" style="background:#101a14;border:1px solid #e8c26a55">
+            <div class="modal-header" style="border-color:#ffffff18">
+              <h5 class="modal-title mb-0" id="serahTitle"></h5>
+              <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Tutup"></button>
+            </div>
+            <div class="modal-body">
+              <p class="muted" id="serahInfo" style="font-size:13px"></p>
+              <label class="form-label" id="serahFotoLbl"></label>
+              <input type="file" id="serahFoto" accept="image/*" class="form-control">
+              <div id="serahPv" class="mt-2"></div>
+            </div>
+            <div class="modal-footer" style="border-color:#ffffff18">
+              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+              <button type="button" class="btn btn-primary" id="serahConfirm"></button>
+            </div>
+          </div>
+        </div>
+      </div>`);
+    m = $('#serahModal');
+  }
+  $('#serahTitle').innerHTML = terima
+    ? '<i class="bi bi-box-seam me-2"></i>Barang Diterima'
+    : '<i class="bi bi-box-arrow-up me-2"></i>Barang Dikembalikan';
+  $('#serahInfo').textContent = terima
+    ? 'Pastikan barang fisik sudah di tangan. Dana akan dicairkan dan tagihan mulai berjalan.'
+    : 'Pastikan barang sudah diserahkan kembali ke peminjam.';
+  $('#serahFotoLbl').textContent = terima ? 'Foto kondisi barang saat diterima (wajib)' : 'Foto kondisi barang saat dikembalikan (wajib)';
+  $('#serahConfirm').innerHTML = terima
+    ? '<i class="bi bi-check-lg me-1"></i>Terima & Cairkan'
+    : '<i class="bi bi-check-lg me-1"></i>Konfirmasi Dikembalikan';
+  $('#serahFoto').value = '';
+  $('#serahPv').innerHTML = '';
+  $('#serahFoto').onchange = (e) => {
+    const f = e.target.files[0];
+    $('#serahPv').innerHTML = f ? `<img src="${URL.createObjectURL(f)}" class="proof-thumb" alt="Preview">` : '';
+  };
+  $('#serahConfirm').onclick = async () => {
+    try {
+      const f = $('#serahFoto').files[0];
+      if (!f) { toast('Lampirkan foto kondisi barang dulu.', true); return; }
+      $('#serahConfirm').disabled = true;
+      const foto = await compressImage(f);
+      await api('/api/loan-action', 'POST', {
+        action: terima ? 'terima-barang' : 'serahkan-barang', loanId, foto,
+      });
+      toast(terima ? 'Barang diterima. Dana cair.' : 'Barang dicatat sudah dikembalikan.');
+      bootstrap.Modal.getInstance(m).hide();
+      go('pengajuan');
+    } catch (e) { toast(e.message, true); }
+    finally { $('#serahConfirm').disabled = false; }
   };
   bootstrap.Modal.getOrCreateInstance(m).show();
 }
@@ -1487,7 +1629,7 @@ async function vBroadcast() {
 const VIEWS = {
   login: vLogin, register: vRegister,
   bDash: vBDash, ajukan: vAjukan, gadai: vGadai, bayar: vBayar, riwayat: vRiwayat, akun: vAkun, notif: vNotif,
-  aDash: vADash, pengajuan: vPengajuan, klaim: vKlaim, peminjam: vPeminjam, verifikasi: vVerifikasi, broadcast: vBroadcast, audit: vAudit, pengaturan: vPengaturan,
+  aDash: vADash, pengajuan: vPengajuan, klaim: vKlaim, inventaris: vInventaris, peminjam: vPeminjam, verifikasi: vVerifikasi, broadcast: vBroadcast, audit: vAudit, pengaturan: vPengaturan,
 };
 
 $('#btnLogout').addEventListener('click', logout);

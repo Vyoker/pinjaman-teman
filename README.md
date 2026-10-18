@@ -82,6 +82,12 @@ Total tagihan = Pokok + (Pokok x 0,2% x tenor hari) + Rp 2.000 (biaya layanan)
   setelah lunas admin tekan "Barang dikembalikan". Slot aktif terpisah
   (1 tunai + 1 gadai boleh jalan bareng); menu Bayar dibagi 2 seksi
   (Pinjaman Tunai & Gadai Barang).
+- **v2.2 (inventaris + serah-terima + alasan tolak)**: menu Inventaris
+  admin — daftar barang titipan aktif (foto, pemilik, sejak kapan,
+  taksir) + riwayat barang yang sudah dikembalikan; foto kondisi barang
+  WAJIB saat "Barang diterima" dan "Barang dikembalikan" (bukti
+  sengketa); admin bisa menulis alasan penolakan yang terlihat oleh
+  peminjam di kartu pengajuannya.
 
 ## Arsitektur
 
