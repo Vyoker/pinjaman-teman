@@ -11,7 +11,25 @@ const SERVICE_FEE = 2000;    // biaya layanan flat per pinjaman
 const MDR_QRIS = 0.01;       // 1% per transaksi QRIS
 const LATE_FEE_RATE = 0.01;  // denda telat 1% per hari (flat, dari nominal tagihan)
 const MIN_TENOR = 15;
-/** v2.3: jeda wajib setelah pelunasan sebelum boleh mengajukan lagi (per jenis). */
+/** v2.5: tutup buku — tanggal 1 bulan depan dari tanggal acuan. */
+function nextFirstDate(ref) {
+  const d = ref ? new Date(ref) : new Date();
+  return new Date(d.getFullYear(), d.getMonth() + 1, 1);
+}
+
+/** v2.5: jumlah hari dari tanggal acuan sampai tanggal 1 bulan depan. */
+function daysToNextFirst(ref) {
+  const d = ref ? new Date(ref) : new Date();
+  const start = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const first = nextFirstDate(d);
+  return Math.round((first - start) / 864e5);
+}
+
+/** Format tanggal lokal YYYY-MM-DD (tanpa geseran UTC seperti toISOString). */
+function localDateStr(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+/** v2.3: jeda wajib setelah pelunasan sebelum boleh mengajukan lagi. */
 const COOLDOWN_MS = 3 * 864e5;
 
 /**
@@ -54,15 +72,15 @@ function splitDueDays(tenorHari, n) {
 /**
  * Hitung simulasi / struktur pinjaman.
  * @param {number} pokok
- * @param {number} tenorHari  (15-30)
+ * @param {number} tenorHari  (v2.5: hari sistem, 1-31 untuk tutup buku)
  * @param {'lunas'|'cicilan'} metode
  * @returns {{pokok,tenorHari,metode,bunga,biayaLayanan,total,nCicilan,schedule}}
  *   schedule: [{ n, dueInDays, amount }]
  */
-function calcLoan(pokok, tenorHari, metode, maxTenor = MAX_TENOR) {
+function calcLoan(pokok, tenorHari, metode, maxTenor = MAX_TENOR_ABS) {
   if (!Number.isInteger(pokok) || pokok <= 0) throw new Error('Pokok harus bilangan bulat positif.');
-  if (!Number.isInteger(tenorHari) || tenorHari < MIN_TENOR || tenorHari > maxTenor) {
-    throw new Error(`Tenor harus ${MIN_TENOR}-${maxTenor} hari.`);
+  if (!Number.isInteger(tenorHari) || tenorHari < 1 || tenorHari > maxTenor) {
+    throw new Error(`Tenor harus 1-${maxTenor} hari.`);
   }
   if (metode !== 'lunas' && metode !== 'cicilan') throw new Error("Metode harus 'lunas' atau 'cicilan'.");
 
@@ -161,6 +179,9 @@ module.exports = {
   MIN_TENOR,
   COOLDOWN_MS,
   cooldownRemaining,
+  nextFirstDate,
+  daysToNextFirst,
+  localDateStr,
   MAX_TENOR,
   MAX_TENOR_ABS,
   RANKS,

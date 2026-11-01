@@ -1,24 +1,23 @@
 'use strict';
-// POST /api/simulate  { pokok, tenorHari, metode } -> simulasi lengkap incl. total per metode bayar
+// POST /api/simulate  { pokok } -> simulasi tutup buku v2.5:
+//   jatuh tempo = tanggal 1 bulan depan, tenor = hari sampai tanggal itu,
+//   pelunasan sekali lunas.
 const { getJSON } = require('../lib/store');
 const { requireAuth, readBody, send } = require('../lib/auth');
-const { calcLoan, amountWithMethod, maxTenorFor, rankBonusFor, MAX_TENOR_ABS } = require('../lib/calc');
+const { calcLoan, amountWithMethod, daysToNextFirst, nextFirstDate, localDateStr } = require('../lib/calc');
 const { effectiveLimit, limitBonus } = require('../lib/profile');
 
 module.exports = requireAuth(async (req, res) => {
   if (req.method !== 'POST') return send(res, 405, { ok: false, error: 'Method tidak didukung.' });
   try {
-    const { pokok, tenorHari, metode } = await readBody(req);
-    // Peminjam dibatasi tenor rank-nya; admin boleh preview sampai batas absolut
-    let maxTenor = MAX_TENOR_ABS;
-    let rankBonus = 0;
-    if (req.session.role === 'borrower') {
-      const u0 = await getJSON('user:' + req.session.phone);
-      const payments = (u0 && u0.stats && u0.stats.loansLunas) || 0;
-      maxTenor = maxTenorFor(payments);
-      rankBonus = rankBonusFor(payments);
+    const { pokok } = await readBody(req);
+    const pk = Number(pokok);
+    if (!Number.isInteger(pk) || pk <= 0) {
+      return send(res, 400, { ok: false, error: 'Pokok tidak valid.' });
     }
-    const sim = calcLoan(Number(pokok), Number(tenorHari), metode, maxTenor);
+    const days = daysToNextFirst(new Date());
+    const dueDate = localDateStr(nextFirstDate(new Date()));
+    const sim = calcLoan(pk, days, 'lunas');
 
     const withPay = (amount) => ({
       dana: amountWithMethod(amount, 'dana'),
@@ -27,7 +26,7 @@ module.exports = requireAuth(async (req, res) => {
     });
 
     const schedule = sim.schedule.map((s) => ({ ...s, bayar: withPay(s.amount) }));
-    const out = { ok: true, ...sim, schedule, totalBayar: withPay(sim.total) };
+    const out = { ok: true, ...sim, days, dueDate, schedule, totalBayar: withPay(sim.total) };
 
     if (req.session.role === 'borrower') {
       const user = await getJSON('user:' + req.session.phone);
@@ -35,8 +34,6 @@ module.exports = requireAuth(async (req, res) => {
       out.limit = eff;
       out.limitDasar = user ? user.limit : 0;
       out.bonusLimit = user ? limitBonus(user.profile) : 0;
-      out.rankBonus = rankBonus;
-      out.maxTenor = maxTenor;
       out.lebihDariLimit = sim.pokok > eff;
     }
     return send(res, 200, out);

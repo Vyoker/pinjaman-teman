@@ -1,7 +1,7 @@
 'use strict';
 /* Pinjaman Teman — SPA frontend (Bootstrap 5 + animasi) */
 
-const APP_VERSION = '2.4.0';
+const APP_VERSION = '2.5.0';
 const $ = (s) => document.querySelector(s);
 /** Pasang handler ke semua elemen yang cocok (pengganti pola querySelectorAll berulang). */
 const bindAll = (sel, ev, fn) => document.querySelectorAll(sel).forEach((el) => el.addEventListener(ev, fn));
@@ -20,7 +20,7 @@ function fmtDate(iso) {
   const d = new Date(iso.length <= 10 ? iso + 'T00:00:00' : iso);
   return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
 }
-/** v2.3: sisa cooldown (ms) per jenis; 0 bila tidak ada. */
+/** v2.3: sisa cooldown (ms); 0 bila tidak ada. */
 function cooldownMs(loans) {
   const done = loans
     .filter((l) => l.status === 'lunas' && l.lunasAt)
@@ -298,10 +298,9 @@ async function vBDash() {
       <div class="kv"><span class="k">Total pernah pinjam</span><span class="v">${fmtRp(stt.totalPinjam)}</span></div>
       ${nx ? `<div class="mt-2"><div class="d-flex justify-content-between"><span class="muted">Menuju ${esc(nx.name)}</span><span class="muted">${stt.loansLunas}/${nx.min} pelunasan</span></div>
         <div class="progress mt-1" style="height:10px;background:#0e1712"><div class="progress-bar" role="progressbar" style="width:${pct}%;background:linear-gradient(90deg,var(--emerald),${nx.color})"></div></div>
-        <p class="muted mt-2 mb-0" style="font-size:12px"><i class="bi bi-gift me-1"></i>${esc(nx.name)}: bonus limit ${fmtRp(nx.bonus)}${nx.maxTenor > 30 ? `, tenor hingga ${nx.maxTenor} hari` : ''}</p></div>`
+        <p class="muted mt-2 mb-0" style="font-size:12px"><i class="bi bi-gift me-1"></i>${esc(nx.name)}: bonus limit ${fmtRp(nx.bonus)}</p></div>`
         : (rk ? `<p class="note mt-2"><i class="bi bi-gem me-1"></i>Rank tertinggi tercapai. Pertahankan!</p>` : '')}
-      ${rk ? `<div class="kv mt-2"><span class="k">Bonus limit rank</span><span class="v" style="color:var(--gold)">+${fmtRp(rk.bonus)}</span></div>
-      <div class="kv"><span class="k">Tenor maksimum</span><span class="v">${rk.maxTenor} hari</span></div>` : ''}
+      ${rk ? `<div class="kv mt-2"><span class="k">Bonus limit rank</span><span class="v" style="color:var(--gold)">+${fmtRp(rk.bonus)}</span></div>` : ''}
       <p class="muted mt-2 mb-0" style="font-size:12px">Denda telat: 1%/hari dari tagihan. Bayar tepat waktu untuk naik rank lebih cepat.</p>
     </div>`;
   main.innerHTML = `
@@ -336,7 +335,6 @@ async function vAjukan() {
   const cd = cooldownMs(loans); // v2.3: jeda 3 hari setelah pelunasan
   if (cd > 0) { main.innerHTML = cooldownNote(cd); return; }
   const eff = Math.floor(((me.effectiveLimit ?? me.limit) || 0) / 1000) * 1000;
-  const maxT = me.maxTenor || 30;
   const defPokok = eff >= 500000 ? 500000 : Math.max(eff, 1000);
   main.innerHTML = `
     <div${stagger(0, 'card')}>
@@ -348,19 +346,13 @@ async function vAjukan() {
         : `<label class="form-label">Jumlah pokok: <strong id="a-pokok-lbl" style="color:var(--gold)">${fmtRp(defPokok)}</strong></label>
       <input id="a-pokok" class="form-range" type="range" min="1000" max="${eff}" step="1000" value="${defPokok}">
       <div class="d-flex justify-content-between mb-1"><span class="muted" style="font-size:12px">Rp 1.000</span><span class="muted" style="font-size:12px">maks ${fmtRp(eff)}</span></div>`}
-      <label class="form-label">Tenor: <strong id="a-tenor-lbl" style="color:var(--gold)">30</strong> hari${maxT > 30 ? ` <span class="muted" style="font-size:12px">(rank ${esc(me.rank && me.rank.name)} membuka hingga ${maxT} hari)</span>` : ''}</label>
-      <input id="a-tenor" class="form-range" type="range" min="15" max="${maxT}" value="30">
-      <label class="form-label">Metode pelunasan</label>
-      <div class="radio-cards">
-        <label><input type="radio" name="a-metode" value="lunas" checked> Sekaligus</label>
-        <label><input type="radio" name="a-metode" value="cicilan"> Cicilan</label>
-      </div>
+      <div class="kv mt-2"><span class="k">Jatuh tempo (tutup buku)</span><span class="v" style="color:var(--gold)">Tanggal 1 bulan depan</span></div>
+      <p class="muted mb-0" style="font-size:12px">Pelunasan sekali lunas. Bunga harian dihitung sampai tanggal 1. Tanggal final ditetapkan saat persetujuan.</p>
       <div id="a-sim"></div>
       <button class="btn btn-primary w-100 mt-3" id="a-submit" ${eff < 1000 ? 'disabled' : ''}><i class="bi bi-send-fill me-2"></i>Kirim Pengajuan</button>
     </div>`;
 
   const pRange = $('#a-pokok');
-  const tRange = $('#a-tenor');
   const paint = (el, min, max) => {
     const p = max > min ? ((el.value - min) / (max - min)) * 100 : 0;
     el.style.setProperty('--fill', p + '%');
@@ -369,46 +361,33 @@ async function vAjukan() {
   const renderSim = async () => {
     if (!pRange) return;
     const pokok = Number(pRange.value);
-    const tenor = Number(tRange.value);
     $('#a-pokok-lbl').textContent = fmtRp(pokok);
-    $('#a-tenor-lbl').textContent = tenor;
     paint(pRange, 1000, eff);
-    paint(tRange, 15, maxT);
     if (!pokok || pokok <= 0) { $('#a-sim').innerHTML = ''; return; }
     try {
-      const s = await api('/api/simulate', 'POST', {
-        pokok, tenorHari: tenor,
-        metode: document.querySelector('input[name="a-metode"]:checked').value,
-      });
+      const s = await api('/api/simulate', 'POST', { pokok });
       $('#a-sim').innerHTML = `
         <div class="anim-pop">
         <h4>Simulasi</h4>
-        <div class="kv"><span class="k">Bunga (0,2%/hari)</span><span class="v">${fmtRp(s.bunga)}</span></div>
+        <div class="kv"><span class="k">Bunga (0,2%/hari × ${s.days} hari)</span><span class="v">${fmtRp(s.bunga)}</span></div>
         <div class="kv"><span class="k">Biaya layanan</span><span class="v">${fmtRp(s.biayaLayanan)}</span></div>
         <div class="kv"><span class="k">Total tagihan</span><span class="v big">${fmtRp(s.total)}</span></div>
-        ${s.metode === 'cicilan' ? `<div class="kv"><span class="k">Cicilan otomatis</span><span class="v">${s.nCicilan}x</span></div>
-        <div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>#</th><th class="text-end">Jumlah</th></tr></thead>
-        <tbody>${s.schedule.map((x) => `<tr><td>${x.n}</td><td class="text-end">${fmtRp(x.amount)}</td></tr>`).join('')}</tbody></table></div>` : ''}
+        <div class="kv"><span class="k">Jatuh tempo</span><span class="v">${fmtDate(s.dueDate)}</span></div>
         <h4>Total bayar per metode</h4>
         <div class="kv"><span class="k"><i class="bi bi-wallet2 me-1"></i>Dana / ShopeePay</span><span class="v green">${fmtRp(s.totalBayar.dana)}</span></div>
         <div class="kv"><span class="k"><i class="bi bi-qr-code me-1"></i>QRIS (+1% MDR)</span><span class="v">${fmtRp(s.totalBayar.qris)}</span></div>
         ${s.lebihDariLimit ? '<p class="note warn"><i class="bi bi-exclamation-triangle-fill me-1"></i>Pokok melebihi limit kamu.</p>' : ''}
-        <p class="note"><i class="bi bi-info-circle-fill me-1"></i>Tenor final ditentukan admin saat persetujuan (15–${s.maxTenor || 30} hari).</p>
         </div>`;
     } catch (e) { $('#a-sim').innerHTML = `<p class="note warn">${esc(e.message)}</p>`; }
   };
   const deb = () => { clearTimeout(simTimer); simTimer = setTimeout(renderSim, 450); };
   if (pRange) pRange.addEventListener('input', deb);
-  tRange.addEventListener('input', deb);
-  document.querySelectorAll('input[name="a-metode"]').forEach((r) => r.addEventListener('change', renderSim));
   if (pRange) renderSim();
 
   $('#a-submit').addEventListener('click', async () => {
     try {
       await api('/api/loans', 'POST', {
         pokok: Number($('#a-pokok').value),
-        tenorHari: Number(tRange.value),
-        metode: document.querySelector('input[name="a-metode"]:checked').value,
       });
       toast('Pengajuan terkirim. Menunggu persetujuan admin.');
       go('bDash');
@@ -603,12 +582,9 @@ async function vPengajuan() {
     <div${stagger(i, 'card')}>
       <div class="d-flex justify-content-between align-items-center mb-2"><strong>${esc(l.borrowerName)}</strong>${badge(l.status)}</div>
       <div class="kv"><span class="k">Pokok</span><span class="v">${fmtRp(l.pokok)}</span></div>
-      <div class="kv"><span class="k">Usulan tenor</span><span class="v">${l.tenorProposal} hari</span></div>
-      <div class="kv"><span class="k">Metode</span><span class="v">${l.metode === 'cicilan' ? 'Cicilan' : 'Sekaligus'}</span></div>
+      <div class="kv"><span class="k">Jatuh tempo</span><span class="v">Tanggal 1 bulan depan (tutup buku)</span></div>
       <div class="kv"><span class="k">Pencairan</span><span class="v">${pcTxt(l.borrowerPhone)}</span></div>
       <div class="kv"><span class="k">Diajukan</span><span class="v">${fmtDate(l.createdAt)}</span></div>
-      <label class="form-label">Tenor final (15–${l.maxTenor || 30} hari)</label>
-      <input type="number" id="t-${l.id}" class="form-control" min="15" max="${l.maxTenor || 30}" value="${l.tenorProposal}">
       <div id="sim-${l.id}" class="mt-2"><p class="muted mb-0"><i class="bi bi-hourglass-split me-1"></i>Menghitung rincian…</p></div>
       <div class="d-flex gap-2 mt-3">
         <button class="btn btn-primary btn-sm flex-fill" data-ok="${l.id}"><i class="bi bi-check-lg me-1"></i>Setujui</button>
@@ -646,39 +622,26 @@ async function vPengajuan() {
     </div>`;
   }).join('') || `<div class="card anim-in"><p class="muted mb-0"><i class="bi bi-inbox me-2"></i>Tidak ada pinjaman berjalan.</p></div>`);
   main.innerHTML = secPengajuan + secBerjalan;
-  // Preview rincian (bunga + biaya + total) per pengajuan, ikut tenor final
-  const timers = {};
+  // Preview rincian (bunga + biaya + total) per pengajuan — tutup buku
   const loadSim = async (l) => {
     const el = $('#sim-' + l.id);
     if (!el) return;
-    const tn = Number($('#t-' + l.id).value);
-    const mt = l.maxTenor || 30;
-    if (!Number.isInteger(tn) || tn < 15 || tn > mt) {
-      el.innerHTML = `<p class="note warn mb-0"><i class="bi bi-exclamation-triangle-fill me-1"></i>Tenor harus 15–${mt} hari.</p>`;
-      return;
-    }
     try {
-      const s = await api('/api/simulate', 'POST', { pokok: l.pokok, tenorHari: tn, metode: l.metode });
+      const s = await api('/api/simulate', 'POST', { pokok: l.pokok });
       el.innerHTML = `
-        <div class="kv"><span class="k">Bunga (0,2%/hari)</span><span class="v">${fmtRp(s.bunga)}</span></div>
+        <div class="kv"><span class="k">Bunga (0,2%/hari × ${s.days} hari)</span><span class="v">${fmtRp(s.bunga)}</span></div>
         <div class="kv"><span class="k">Biaya layanan</span><span class="v">${fmtRp(s.biayaLayanan)}</span></div>
         <div class="kv"><span class="k">Total tagihan</span><span class="v" style="color:var(--gold)">${fmtRp(s.total)}</span></div>
-        ${s.metode === 'cicilan' ? `<div class="kv"><span class="k">Cicilan</span><span class="v">${s.nCicilan}x: ${s.schedule.map((x) => fmtRp(x.amount)).join(' + ')}</span></div>` : ''}`;
+        <p class="muted mb-0" style="font-size:12px">Jatuh tempo final ditetapkan saat persetujuan (tanggal 1 bulan depan dari tanggal cair).</p>`;
     } catch (e) {
       el.innerHTML = `<p class="note warn mb-0">${esc(e.message)}</p>`;
     }
   };
-  pending.forEach((l) => {
-    loadSim(l);
-    $('#t-' + l.id).addEventListener('input', () => {
-      clearTimeout(timers[l.id]);
-      timers[l.id] = setTimeout(() => loadSim(l), 350);
-    });
-  });
+  pending.forEach((l) => loadSim(l));
   main.querySelectorAll('[data-ok]').forEach((b) => b.addEventListener('click', async () => {
     try {
       await api('/api/loan-action', 'POST', {
-        action: 'decide', loanId: b.dataset.ok, approve: true, tenorHari: Number($('#t-' + b.dataset.ok).value),
+        action: 'decide', loanId: b.dataset.ok, approve: true,
       });
       toast('Pinjaman disetujui. Jadwal dibuat otomatis.');
       go('pengajuan');

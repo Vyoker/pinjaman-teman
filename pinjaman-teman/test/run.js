@@ -76,8 +76,8 @@ function ok(cond, label) {
 
   ok(calc.amountWithMethod(532000, 'qris') === 537320, 'QRIS +1% MDR = 537.320');
   ok(calc.amountWithMethod(532000, 'dana') === 532000, 'Dana tanpa tambahan');
-  assert.throws(() => calc.calcLoan(500000, 10, 'lunas'), /Tenor/, 'tenor <15 ditolak');
-  assert.throws(() => calc.calcLoan(500000, 31, 'lunas'), /Tenor/, 'tenor >30 ditolak');
+  assert.throws(() => calc.calcLoan(500000, 0, 'lunas'), /Tenor/, 'tenor 0 ditolak');
+  assert.throws(() => calc.calcLoan(500000, 61, 'lunas'), /Tenor/, 'tenor >60 ditolak');
   console.log('  ok - validasi tenor');
 
   console.log('== Tes denda & rank ==');
@@ -140,23 +140,27 @@ function ok(cond, label) {
   r = await call('../api/profile', { method: 'POST', headers: auth(tB), body: { action: 'pencairan', metode: 'dana', nomor: '081299998888', atasNama: 'Budi Santoso' } });
   assert.ok(r.json.ok, 'Budi isi data pencairan');
   // 6. simulasi melebihi limit
-  r = await call('../api/simulate', { method: 'POST', headers: auth(tB), body: { pokok: 2000000, tenorHari: 30, metode: 'lunas' } });
+  r = await call('../api/simulate', { method: 'POST', headers: auth(tB), body: { pokok: 2000000 } });
   ok(r.json.lebihDariLimit === true, 'simulasi tandai melebihi limit');
   // 7. ajukan
-  r = await call('../api/loans', { method: 'POST', headers: auth(tB), body: { pokok: 500000, tenorHari: 30, metode: 'cicilan' } });
+  r = await call('../api/loans', { method: 'POST', headers: auth(tB), body: { pokok: 500000 } });
   ok(r.json.ok && r.json.loan.status === 'diajukan', 'pengajuan pinjaman');
   const loanId = r.json.loan.id;
   // 8. ajukan lagi saat masih aktif -> tolak
-  r = await call('../api/loans', { method: 'POST', headers: auth(tB), body: { pokok: 100000, tenorHari: 15, metode: 'lunas' } });
+  r = await call('../api/loans', { method: 'POST', headers: auth(tB), body: { pokok: 100000 } });
   ok(!r.json.ok, 'pengajuan ganda ditolak');
-  // 9. admin setujui dengan tenor final
-  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId, approve: true, tenorHari: 30 } });
+  // 9. admin setujui (tutup buku: jatuh tempo tanggal 1 bulan depan)
+  const daysB = calc.daysToNextFirst(new Date());
+  const expTotalB = calc.calcLoan(500000, daysB, 'lunas').total;
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId, approve: true } });
   ok(r.json.ok && r.json.loan.status === 'berjalan', 'pinjaman disetujui -> berjalan');
-  ok(r.json.loan.schedule.length === 4, 'jadwal 4 cicilan dibuat');
-  ok(r.json.loan.total === 532000, 'total jadwal 532.000');
-  // 10. bayar cicilan 1 via QRIS
+  ok(r.json.loan.schedule.length === 1, 'jadwal 1 tagihan (tutup buku)');
+  ok(r.json.loan.total === expTotalB, 'total sesuai hari sampai tanggal 1 (dapat ' + r.json.loan.total + ')');
+  ok(r.json.loan.tenorHari === daysB && r.json.loan.schedule[0].dueDate === calc.localDateStr(calc.nextFirstDate(new Date())), 'jatuh tempo tanggal 1 bulan depan');
+  // 10. bayar tagihan via QRIS
+  const expQrisB = calc.amountWithMethod(expTotalB, 'qris');
   r = await call('../api/payments', { method: 'POST', headers: auth(tB), body: { action: 'claim', loanId, schedIdx: 0, payMethod: 'qris', proof: PROOF } });
-  ok(r.json.ok && r.json.claim.amount === 134330, 'klaim cicilan-1 QRIS = 134.330 (dapat ' + (r.json.claim && r.json.claim.amount) + ')');
+  ok(r.json.ok && r.json.claim.amount === expQrisB, 'klaim QRIS = total +1% (dapat ' + (r.json.claim && r.json.claim.amount) + ')');
   const claimId = r.json.claim.id;
   // 11. klaim ganda item sama -> tolak
   r = await call('../api/payments', { method: 'POST', headers: auth(tB), body: { action: 'claim', loanId, schedIdx: 0, payMethod: 'dana' } });
@@ -164,16 +168,9 @@ function ok(cond, label) {
   // 12. admin konfirmasi terima
   r = await call('../api/payments', { method: 'POST', headers: auth(tA), body: { action: 'confirm', claimId, approve: true } });
   ok(r.json.ok && r.json.claim.status === 'diterima', 'klaim diterima');
-  ok(r.json.loan.schedule[0].status === 'lunas', 'cicilan-1 lunas');
-  // 13. lunasi sisa 3 via dana
-  for (let i = 1; i <= 3; i++) {
-    r = await call('../api/payments', { method: 'POST', headers: auth(tB), body: { action: 'claim', loanId, schedIdx: i, payMethod: 'dana', proof: PROOF } });
-    assert.ok(r.json.ok, 'klaim cicilan-' + (i + 1));
-    r = await call('../api/payments', { method: 'POST', headers: auth(tA), body: { action: 'confirm', claimId: r.json.claim.id, approve: true } });
-    assert.ok(r.json.ok, 'konfirmasi cicilan-' + (i + 1));
-  }
+  ok(r.json.loan.schedule[0].status === 'lunas', 'tagihan lunas');
   r = await call('../api/loans', { method: 'GET', headers: auth(tB) });
-  ok(r.json.loans[0].status === 'lunas', 'pinjaman lunas setelah semua cicilan');
+  ok(r.json.loans[0].status === 'lunas', 'pinjaman lunas setelah tagihan dibayar');
   // 14. stats
   r = await call('../api/admin-stats', { method: 'GET', headers: auth(tA) });
   ok(r.json.ok && r.json.outstanding === 0, 'outstanding 0 setelah lunas');
@@ -187,8 +184,8 @@ function ok(cond, label) {
   console.log('== Tes e2e denda & statistik ==');
   // 17. statistik & rank tercatat setelah alur pertama
   r = await call('../api/me', { method: 'GET', headers: auth(tB) });
-  ok(r.json.stats.payments === 4 && r.json.stats.loansLunas === 1 && r.json.stats.totalPinjam === 500000,
-    'statistik: 4 bayar, 1 lunas, total pinjam 500rb');
+  ok(r.json.stats.payments === 1 && r.json.stats.loansLunas === 1 && r.json.stats.totalPinjam === 500000,
+    'statistik: 1 bayar, 1 lunas, total pinjam 500rb');
   ok(r.json.rank && r.json.rank.name === 'Bronze' && r.json.nextRank.name === 'Silver', 'rank Bronze setelah 1 pelunasan');
 
   // 18. pinjaman kedua, jatuh tempo dimundurkan 5 hari -> kena denda
@@ -196,29 +193,31 @@ function ok(cond, label) {
   const l1 = await getJSON('loan:' + loanId);
   l1.lunasAt = new Date(Date.now() - 4 * 864e5).toISOString();
   await setJSON('loan:' + loanId, l1);
-  r = await call('../api/loans', { method: 'POST', headers: auth(tB), body: { pokok: 300000, tenorHari: 15, metode: 'lunas' } });
+  r = await call('../api/loans', { method: 'POST', headers: auth(tB), body: { pokok: 300000 } });
   assert.ok(r.json.ok, 'pengajuan kedua');
   const loan2 = r.json.loan.id;
-  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId: loan2, approve: true, tenorHari: 15 } });
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId: loan2, approve: true } });
   assert.ok(r.json.ok, 'pinjaman kedua disetujui');
-  assert.strictEqual(r.json.loan.total, 311000, 'total pinjaman kedua 311.000');
+  const tot2 = r.json.loan.total;
+  assert.strictEqual(tot2, calc.calcLoan(300000, calc.daysToNextFirst(new Date()), 'lunas').total, 'total pinjaman kedua sesuai hari tutup buku');
   const l2 = await getJSON('loan:' + loan2);
   l2.schedule[0].dueDate = new Date(Date.now() - 5 * 864e5).toISOString().slice(0, 10);
   await setJSON('loan:' + loan2, l2);
   r = await call('../api/loans', { method: 'GET', headers: auth(tB) });
+  const expFee2 = Math.round(tot2 * 0.01 * 5);
   const it2 = r.json.loans[0].schedule[0];
-  ok(it2.daysLate === 5 && it2.lateFee === 15550 && it2.totalDue === 326550,
-    'denda tampil: 5 hari x 1% x 311.000 = 15.550');
+  ok(it2.daysLate === 5 && it2.lateFee === expFee2 && it2.totalDue === tot2 + expFee2,
+    'denda tampil: 5 hari x 1% x total');
   // 19. klaim via dana (tanpa MDR) -> nominal termasuk denda
   r = await call('../api/payments', { method: 'POST', headers: auth(tB), body: { action: 'claim', loanId: loan2, schedIdx: 0, payMethod: 'dana', proof: PROOF } });
-  ok(r.json.ok && r.json.claim.lateFee === 15550 && r.json.claim.amount === 326550, 'klaim termasuk denda');
+  ok(r.json.ok && r.json.claim.lateFee === expFee2 && r.json.claim.amount === tot2 + expFee2, 'klaim termasuk denda');
   // 20. admin konfirmasi -> denda tercatat, statistik bertambah
   r = await call('../api/payments', { method: 'POST', headers: auth(tA), body: { action: 'confirm', claimId: r.json.claim.id, approve: true } });
   ok(r.json.ok && r.json.loan.status === 'lunas', 'pinjaman kedua lunas');
-  ok(r.json.loan.schedule[0].lateFeePaid === 15550, 'denda tercatat lunas');
+  ok(r.json.loan.schedule[0].lateFeePaid === expFee2, 'denda tercatat lunas');
   r = await call('../api/me', { method: 'GET', headers: auth(tB) });
-  ok(r.json.stats.payments === 5 && r.json.stats.loansLunas === 2 && r.json.stats.totalPinjam === 800000,
-    'statistik terakumulasi: 5 bayar, 2 lunas, 800rb');
+  ok(r.json.stats.payments === 2 && r.json.stats.loansLunas === 2 && r.json.stats.totalPinjam === 800000,
+    'statistik terakumulasi: 2 bayar, 2 lunas, 800rb');
   r = await call('../api/admin-stats', { method: 'GET', headers: auth(tA) });
   ok(r.json.ok && r.json.outstanding === 0, 'outstanding kembali 0');
 
@@ -261,15 +260,15 @@ function ok(cond, label) {
   r = await call('../api/me', { method: 'GET', headers: authS });
   ok(r.json.bonusLimit === 2500 && r.json.effectiveLimit === 102500, 'me: bonus 2.500, efektif 102.500');
   // pengajuan di atas efektif ditolak, di bawah efektif lolos
-  r = await call('../api/loans', { method: 'POST', headers: authS, body: { pokok: 103000, tenorHari: 15, metode: 'lunas' } });
+  r = await call('../api/loans', { method: 'POST', headers: authS, body: { pokok: 103000 } });
   ok(!r.json.ok && /limit/i.test(r.json.error), 'pengajuan 103rb ditolak (di atas 102.500)');
-  r = await call('../api/loans', { method: 'POST', headers: authS, body: { pokok: 102000, tenorHari: 15, metode: 'lunas' } });
+  r = await call('../api/loans', { method: 'POST', headers: authS, body: { pokok: 102000 } });
   ok(r.json.ok, 'pengajuan 102rb lolos berkat bonus limit');
 
   console.log('== Tes e2e cancel & hapus akun ==');
   r = await call('../api/loans', { method: 'GET', headers: authS });
   const loanS = r.json.loans.find((l) => l.status === 'diajukan').id;
-  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId: loanS, approve: true, tenorHari: 15 } });
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId: loanS, approve: true } });
   assert.ok(r.json.ok, 'pinjaman Siti disetujui');
   r = await call('../api/loan-action', { method: 'POST', headers: authS, body: { action: 'cancel', loanId: loanS } });
   ok(r.status === 403, 'peminjam ditolak cancel');
@@ -281,22 +280,31 @@ function ok(cond, label) {
   ok(r.json.stats.totalPinjam === 0, 'totalPinjam dikoreksi ke 0');
   r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'cancel', loanId: loanS } });
   ok(r.status === 400, 'cancel pinjaman dibatalkan ditolak');
-  // cancel terhalang pembayaran: Budi cicilan 2x, bayar 1x
+  // cancel terhalang pembayaran: Budi sudah membayar tagihannya
   // v2.3: mundurkan lunasAt pinjaman kedua agar lewat cooldown
   const l2b = await getJSON('loan:' + loan2);
   l2b.lunasAt = new Date(Date.now() - 4 * 864e5).toISOString();
   await setJSON('loan:' + loan2, l2b);
-  r = await call('../api/loans', { method: 'POST', headers: auth(tB), body: { pokok: 200000, tenorHari: 15, metode: 'cicilan' } });
-  assert.ok(r.json.ok, 'pengajuan cicilan Budi');
+  r = await call('../api/loans', { method: 'POST', headers: auth(tB), body: { pokok: 200000 } });
+  assert.ok(r.json.ok, 'pengajuan Budi');
   const loanB = r.json.loan.id;
-  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId: loanB, approve: true, tenorHari: 15 } });
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId: loanB, approve: true } });
   assert.ok(r.json.ok, 'pinjaman Budi disetujui');
   r = await call('../api/payments', { method: 'POST', headers: auth(tB), body: { action: 'claim', loanId: loanB, schedIdx: 0, payMethod: 'dana', proof: PROOF } });
   const cB = r.json.claim.id;
   r = await call('../api/payments', { method: 'POST', headers: auth(tA), body: { action: 'confirm', claimId: cB, approve: true } });
-  assert.ok(r.json.ok, 'cicilan-1 Budi diterima');
+  assert.ok(r.json.ok, 'tagihan Budi diterima');
   r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'cancel', loanId: loanB } });
   ok(r.status === 400, 'cancel pinjaman yang sudah dibayar sebagian ditolak');
+  // hapus akun: Budi perlu pinjaman aktif (pinjaman sebelumnya sudah lunas penuh)
+  const lBb = await getJSON('loan:' + loanB);
+  lBb.lunasAt = new Date(Date.now() - 4 * 864e5).toISOString();
+  await setJSON('loan:' + loanB, lBb);
+  r = await call('../api/loans', { method: 'POST', headers: auth(tB), body: { pokok: 100000 } });
+  assert.ok(r.json.ok, 'pengajuan Budi baru');
+  const loanB2 = r.json.loan.id;
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId: loanB2, approve: true } });
+  assert.ok(r.json.ok, 'pinjaman Budi baru disetujui');
   // hapus akun
   r = await call('../api/borrowers', { method: 'POST', headers: auth(tA), body: { action: 'delete', phone: '08123456789' } });
   ok(r.status === 400, 'hapus akun dengan pinjaman aktif ditolak');
@@ -324,14 +332,14 @@ function ok(cond, label) {
   assert.ok(r.json.ok, 'Dodi disetujui');
   const tD = (await call('../api/auth', { method: 'POST', body: { action: 'login', phone: '081900000003', password: 'dodi1234' } })).json.token;
   const authD = auth(tD);
-  r = await call('../api/loans', { method: 'POST', headers: authD, body: { pokok: 100000, tenorHari: 15, metode: 'lunas' } });
+  r = await call('../api/loans', { method: 'POST', headers: authD, body: { pokok: 100000 } });
   assert.ok(r.json.ok, 'pengajuan Dodi');
   const loanD = r.json.loan.id;
-  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId: loanD, approve: true, tenorHari: 15 } });
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId: loanD, approve: true } });
   ok(r.status === 400 && /pencairan/i.test(r.json.error), 'approve terhalang: pencairan kosong');
   r = await call('../api/profile', { method: 'POST', headers: authD, body: { action: 'pencairan', metode: 'shopeepay', nomor: '081377776666', atasNama: 'Dodi' } });
   ok(r.json.ok && r.json.pencairan.metode === 'shopeepay', 'Dodi simpan pencairan');
-  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId: loanD, approve: true, tenorHari: 15 } });
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId: loanD, approve: true } });
   ok(r.json.ok && r.json.loan.status === 'berjalan', 'approve lolos setelah pencairan terisi');
   // broadcast: validasi
   r = await call('../api/notifications', { method: 'POST', headers: auth(tA), body: { mode: 'all', message: '' } });
@@ -391,10 +399,10 @@ function ok(cond, label) {
   const authE = auth(tE);
   r = await call('../api/profile', { method: 'POST', headers: authE, body: { action: 'pencairan', metode: 'dana', nomor: '081388887777', atasNama: 'Eko Prasetyo' } });
   assert.ok(r.json.ok, 'Eko isi data pencairan');
-  r = await call('../api/loans', { method: 'POST', headers: authE, body: { pokok: 200000, tenorHari: 15, metode: 'lunas' } });
+  r = await call('../api/loans', { method: 'POST', headers: authE, body: { pokok: 200000 } });
   assert.ok(r.json.ok, 'pengajuan Eko');
   const loanE = r.json.loan.id;
-  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId: loanE, approve: true, tenorHari: 15 } });
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId: loanE, approve: true } });
   assert.ok(r.json.ok, 'pinjaman Eko disetujui');
   // tanpa proof -> 400
   r = await call('../api/payments', { method: 'POST', headers: authE, body: { action: 'claim', loanId: loanE, schedIdx: 0, payMethod: 'dana' } });
@@ -416,13 +424,16 @@ function ok(cond, label) {
   const lEb = await getJSON('loan:' + loanE);
   lEb.lunasAt = new Date(Date.now() - 4 * 864e5).toISOString();
   await setJSON('loan:' + loanE, lEb);
-  r = await call('../api/loans', { method: 'POST', headers: authE, body: { pokok: 400000, tenorHari: 30, metode: 'cicilan' } });
-  assert.ok(r.json.ok, 'pengajuan cicilan Eko');
+  r = await call('../api/loans', { method: 'POST', headers: authE, body: { pokok: 400000 } });
+  assert.ok(r.json.ok, 'pengajuan Eko kedua');
   const loanE2 = r.json.loan.id;
-  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId: loanE2, approve: true, tenorHari: 30 } });
-  assert.ok(r.json.ok, 'pinjaman cicilan Eko disetujui');
-  // item jatuh tempo 30 hari lagi -> belum perlu diingatkan
-  r = await call('../api/notifications', { method: 'POST', headers: auth(tA), body: { action: 'remind', loanId: loanE2, schedIdx: 3 } });
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId: loanE2, approve: true } });
+  assert.ok(r.json.ok, 'pinjaman Eko kedua disetujui');
+  // geser jatuh tempo 30 hari ke depan -> belum perlu diingatkan
+  const lE2a = await getJSON('loan:' + loanE2);
+  lE2a.schedule[0].dueDate = new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10);
+  await setJSON('loan:' + loanE2, lE2a);
+  r = await call('../api/notifications', { method: 'POST', headers: auth(tA), body: { action: 'remind', loanId: loanE2, schedIdx: 0 } });
   ok(r.status === 400 && /belum perlu/i.test(r.json.error), 'remind item jauh hari ditolak');
   // peminjam tidak boleh remind
   r = await call('../api/notifications', { method: 'POST', headers: authE, body: { action: 'remind', loanId: loanE2, schedIdx: 0 } });
@@ -458,33 +469,27 @@ function ok(cond, label) {
   const uF = await getJSON('user:081900000005');
   uF.stats = { payments: 45, loansLunas: 8, totalPinjam: 2000000 };
   await setJSON('user:081900000005', uF);
-  // me: bonus rank + max tenor Platinum
+  // me: bonus rank Platinum (unlock tenor sudah tidak berlaku di v2.5)
   r = await call('../api/me', { method: 'GET', headers: auth(tF) });
   ok(r.json.rankBonus === 25000, 'Platinum: rankBonus 25000');
-  ok(r.json.maxTenor === 45, 'Platinum: maxTenor 45');
   ok(r.json.effectiveLimit === 525000, 'effectiveLimit = 500rb + 25rb bonus rank');
   ok(r.json.rank && r.json.rank.name === 'Platinum', 'rank Platinum terdeteksi');
   // apply: pokok di atas limit+bonus rank ditolak
-  r = await call('../api/loans', { method: 'POST', headers: auth(tF), body: { pokok: 526000, tenorHari: 30, metode: 'lunas' } });
+  r = await call('../api/loans', { method: 'POST', headers: auth(tF), body: { pokok: 526000 } });
   ok(r.status === 400 && /limit/i.test(r.json.error), 'pokok 526rb > 525rb ditolak');
-  // apply: tenor 46 ditolak, 45 diterima
-  r = await call('../api/loans', { method: 'POST', headers: auth(tF), body: { pokok: 525000, tenorHari: 46, metode: 'lunas' } });
-  ok(r.status === 400 && /Tenor/i.test(r.json.error), 'tenor 46 untuk Platinum ditolak');
-  r = await call('../api/loans', { method: 'POST', headers: auth(tF), body: { pokok: 525000, tenorHari: 45, metode: 'lunas' } });
-  ok(r.json.ok, 'tenor 45 untuk Platinum diterima');
+  r = await call('../api/loans', { method: 'POST', headers: auth(tF), body: { pokok: 525000 } });
+  ok(r.json.ok && r.json.loan.tutupBuku === true && r.json.loan.metode === 'lunas', 'pengajuan Platinum diterima (tutup buku)');
   const loanF = r.json.loan.id;
-  // simulate mengikuti tenor rank
-  r = await call('../api/simulate', { method: 'POST', headers: auth(tF), body: { pokok: 525000, tenorHari: 45, metode: 'lunas' } });
-  ok(r.json.ok && r.json.maxTenor === 45 && r.json.total === 525000 + 47250 + 2000, 'simulate 45 hari: total 574250');
-  r = await call('../api/simulate', { method: 'POST', headers: auth(tF), body: { pokok: 525000, tenorHari: 46, metode: 'lunas' } });
-  ok(r.status === 400, 'simulate 46 hari untuk Platinum ditolak');
-  // admin approve: 46 ditolak, 45 diterima (butuh pencairan dulu)
+  // simulate tutup buku: total sesuai hari sampai tanggal 1
+  const daysF = calc.daysToNextFirst(new Date());
+  const totF = calc.calcLoan(525000, daysF, 'lunas').total;
+  r = await call('../api/simulate', { method: 'POST', headers: auth(tF), body: { pokok: 525000 } });
+  ok(r.json.ok && r.json.days === daysF && r.json.total === totF && r.json.dueDate === calc.localDateStr(calc.nextFirstDate(new Date())), 'simulate tutup buku: total sesuai hari');
+  // admin approve (butuh pencairan dulu)
   r = await call('../api/profile', { method: 'POST', headers: auth(tF), body: { action: 'pencairan', metode: 'dana', nomor: '081511112222', atasNama: 'Fajar Nugroho' } });
   assert.ok(r.json.ok, 'Fajar isi data pencairan');
-  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId: loanF, approve: true, tenorHari: 46 } });
-  ok(r.status === 400 && /Tenor/i.test(r.json.error), 'admin approve tenor 46 untuk Platinum ditolak');
-  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId: loanF, approve: true, tenorHari: 45 } });
-  ok(r.json.ok && r.json.loan.tenorHari === 45 && r.json.loan.total === 574250, 'admin approve tenor 45: total 574250');
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId: loanF, approve: true } });
+  ok(r.json.ok && r.json.loan.tenorHari === daysF && r.json.loan.total === totF, 'admin approve tutup buku: total sesuai simulate');
   // Gita: Diamond (12 pelunasan)
   r = await call('../api/auth', { method: 'POST', body: { action: 'register', name: 'Gita', phone: '081900000006', password: 'gita1234' } });
   ok(r.json.ok, 'registrasi Gita');
@@ -495,15 +500,10 @@ function ok(cond, label) {
   uG.stats = { payments: 55, loansLunas: 12, totalPinjam: 3000000 };
   await setJSON('user:081900000006', uG);
   r = await call('../api/me', { method: 'GET', headers: auth(tG) });
-  ok(r.json.rankBonus === 50000 && r.json.maxTenor === 60 && r.json.rank.name === 'Diamond', 'Diamond: bonus 50rb, tenor 60');
+  ok(r.json.rankBonus === 50000 && r.json.rank.name === 'Diamond', 'Diamond: bonus 50rb');
   ok(r.json.effectiveLimit === 350000, 'effectiveLimit Gita = 300rb + 50rb');
-  r = await call('../api/loans', { method: 'POST', headers: auth(tG), body: { pokok: 350000, tenorHari: 61, metode: 'lunas' } });
-  ok(r.status === 400, 'tenor 61 untuk Diamond ditolak');
-  r = await call('../api/loans', { method: 'POST', headers: auth(tG), body: { pokok: 350000, tenorHari: 60, metode: 'lunas' } });
-  ok(r.json.ok, 'tenor 60 untuk Diamond diterima');
-  // rank di bawah Platinum tetap maks 30 hari
-  r = await call('../api/loans', { method: 'POST', headers: auth(tB), body: { pokok: 100000, tenorHari: 31, metode: 'lunas' } });
-  ok(r.status === 400 && /Tenor/i.test(r.json.error), 'tenor 31 untuk rank biasa ditolak');
+  r = await call('../api/loans', { method: 'POST', headers: auth(tG), body: { pokok: 350000 } });
+  ok(r.json.ok, 'pengajuan Diamond diterima (tutup buku, tanpa batas tenor rank)');
   // profile memuat rankBonus
   r = await call('../api/profile', { method: 'GET', headers: auth(tF) });
   ok(r.json.rankBonus === 25000 && r.json.effectiveLimit === 525000, 'profile: rankBonus & effectiveLimit sinkron');
@@ -516,11 +516,11 @@ function ok(cond, label) {
   const tH = (await call('../api/auth', { method: 'POST', body: { action: 'login', phone: '081900000007', password: 'hadi1234' } })).json.token;
   r = await call('../api/profile', { method: 'POST', headers: auth(tH), body: { action: 'pencairan', metode: 'dana', nomor: '081522223333', atasNama: 'Hadi Wijaya' } });
   assert.ok(r.json.ok, 'Hadi isi data pencairan');
-  r = await call('../api/loans', { method: 'POST', headers: auth(tH), body: { pokok: 300000, tenorHari: 15, metode: 'cicilan' } });
-  ok(r.json.ok, 'Hadi ajukan cicilan 15 hari');
+  r = await call('../api/loans', { method: 'POST', headers: auth(tH), body: { pokok: 300000 } });
+  ok(r.json.ok, 'Hadi ajukan pinjaman');
   const loanH = r.json.loan.id;
-  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId: loanH, approve: true, tenorHari: 15 } });
-  ok(r.json.ok && r.json.loan.schedule.length === 2, 'admin setujui: 2 cicilan');
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId: loanH, approve: true } });
+  ok(r.json.ok && r.json.loan.schedule.length === 1, 'admin setujui: 1 tagihan tutup buku');
   const amt0 = r.json.loan.schedule[0].amount;
   // peminjam tidak bisa pakai manual-pay
   r = await call('../api/loan-action', { method: 'POST', headers: auth(tH), body: { action: 'manual-pay', loanId: loanH, schedIdx: 0 } });
@@ -536,30 +536,38 @@ function ok(cond, label) {
   // notifikasi sebelum
   const unreadBeforeH = (await call('../api/notifications', { method: 'GET', headers: auth(tH) })).json.unread;
   // cicilan pertama: tunai tepat waktu (hari ini)
-  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'manual-pay', loanId: loanH, schedIdx: 0, note: 'cicilan minggu pertama, tunai' } });
-  ok(r.json.ok, 'manual-pay cicilan #1 diterima');
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'manual-pay', loanId: loanH, schedIdx: 0, note: 'bayar tunai ke admin' } });
+  ok(r.json.ok, 'manual-pay tagihan diterima');
   const it0 = r.json.loan.schedule[0];
   ok(it0.status === 'lunas' && it0.payMethod === 'tunai' && it0.lateFeePaid === 0, 'item #1 lunas via tunai tanpa denda');
-  ok(it0.manualNote === 'cicilan minggu pertama, tunai', 'catatan tersimpan');
+  ok(it0.manualNote === 'bayar tunai ke admin', 'catatan tersimpan');
   // item yang sama tidak bisa ditandai lagi
   r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'manual-pay', loanId: loanH, schedIdx: 0 } });
-  ok(r.status === 400 && /sudah diproses/i.test(r.json.error), 'item lunas tidak bisa ditandai lagi');
-  // cicilan kedua: buat telat 3 hari lalu bayar tunai hari ini
-  const lh = await getJSON('loan:' + loanH);
+  ok(r.status === 400 && /tidak aktif/i.test(r.json.error), 'pinjaman lunas tidak bisa ditandai lagi');
+  // pinjaman kedua Hadi: buat telat 3 hari lalu bayar tunai hari ini
+  const lh0 = await getJSON('loan:' + loanH);
+  lh0.lunasAt = new Date(Date.now() - 4 * 864e5).toISOString();
+  await setJSON('loan:' + loanH, lh0);
+  r = await call('../api/loans', { method: 'POST', headers: auth(tH), body: { pokok: 300000 } });
+  assert.ok(r.json.ok, 'pengajuan kedua Hadi');
+  const loanH2 = r.json.loan.id;
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId: loanH2, approve: true } });
+  assert.ok(r.json.ok, 'pinjaman kedua Hadi disetujui');
+  const lh = await getJSON('loan:' + loanH2);
   const duePast = new Date(Date.now() - 3 * 864e5).toISOString().slice(0, 10);
-  lh.schedule[1].dueDate = duePast;
-  await setJSON('loan:' + loanH, lh);
+  lh.schedule[0].dueDate = duePast;
+  await setJSON('loan:' + loanH2, lh);
   const todayD = new Date().toISOString().slice(0, 10);
-  const expFee = calc.calcLateFee(lh.schedule[1].amount, duePast, todayD).lateFee;
+  const expFee = calc.calcLateFee(lh.schedule[0].amount, duePast, todayD).lateFee;
   ok(expFee > 0, 'skenario telat 3 hari punya denda');
-  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'manual-pay', loanId: loanH, schedIdx: 1, paidDate: todayD } });
-  ok(r.json.ok, 'manual-pay cicilan #2 diterima');
-  const it1 = r.json.loan.schedule[1];
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'manual-pay', loanId: loanH2, schedIdx: 0, paidDate: todayD } });
+  ok(r.json.ok, 'manual-pay tagihan telat diterima');
+  const it1 = r.json.loan.schedule[0];
   ok(it1.status === 'lunas' && it1.lateFeePaid === expFee, `denda tunai telat = ${expFee}`);
-  ok(r.json.loan.status === 'lunas', 'pinjaman lunas setelah semua item ditandai');
+  ok(r.json.loan.status === 'lunas', 'pinjaman kedua lunas setelah ditandai');
   // statistik & notifikasi
   const uH = await getJSON('user:081900000007');
-  ok(uH.stats.payments === 2 && uH.stats.loansLunas === 1, 'stats.payments=2, loansLunas=1');
+  ok(uH.stats.payments === 2 && uH.stats.loansLunas === 2, 'stats.payments=2, loansLunas=2');
   const notifAfter = await call('../api/notifications', { method: 'GET', headers: auth(tH) });
   ok(notifAfter.json.unread === unreadBeforeH + 2, 'peminjam terima 2 notifikasi manual-pay');
   ok(notifAfter.json.notifications.some((x) => /tunai ke admin/i.test(x.message)), 'isi notifikasi menyebut tunai ke admin');
@@ -632,7 +640,7 @@ function ok(cond, label) {
   const tJ = (await call('../api/auth', { method: 'POST', body: { action: 'login', phone: '081900000009', password: 'joko1234' } })).json.token;
   r = await call('../api/profile', { method: 'POST', headers: auth(tJ), body: { action: 'pencairan', metode: 'dana', nomor: '081533334444', atasNama: 'Joko Prasetyo' } });
   assert.ok(r.json.ok, 'Joko isi data pencairan');
-  r = await call('../api/loans', { method: 'POST', headers: auth(tJ), body: { pokok: 300000, tenorHari: 15, metode: 'lunas' } });
+  r = await call('../api/loans', { method: 'POST', headers: auth(tJ), body: { pokok: 300000 } });
   ok(r.json.ok, 'pengajuan Joko diterima');
   const loanJ1 = r.json.loan.id;
   r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId: loanJ1, approve: false, alasan: 'Limit belum cukup, coba lagi bulan depan' } });
@@ -661,7 +669,7 @@ function ok(cond, label) {
   uJ.stats = { payments: 30, loansLunas: 3, totalPinjam: 900000 };
   await setJSON('user:081900000009', uJ);
   r = await call('../api/me', { method: 'GET', headers: auth(tJ) });
-  ok(r.json.rank && r.json.rank.name === 'Silver' && r.json.maxTenor === 30, '3 pelunasan -> Silver');
+  ok(r.json.rank && r.json.rank.name === 'Silver', '3 pelunasan -> Silver');
 
   // ============ v2.3: jeda 3 hari setelah pelunasan ============
   r = await call('../api/auth', { method: 'POST', body: { action: 'register', name: 'Rudi', phone: '081900000010', password: 'rudi1234' } });
@@ -671,26 +679,49 @@ function ok(cond, label) {
   const tR = (await call('../api/auth', { method: 'POST', body: { action: 'login', phone: '081900000010', password: 'rudi1234' } })).json.token;
   r = await call('../api/profile', { method: 'POST', headers: auth(tR), body: { action: 'pencairan', metode: 'dana', nomor: '081544445555', atasNama: 'Rudi Santoso' } });
   assert.ok(r.json.ok, 'Rudi isi data pencairan');
-  r = await call('../api/loans', { method: 'POST', headers: auth(tR), body: { pokok: 200000, tenorHari: 15, metode: 'lunas' } });
+  r = await call('../api/loans', { method: 'POST', headers: auth(tR), body: { pokok: 200000 } });
   ok(r.json.ok, 'Rudi ajukan tunai');
   const loanR1 = r.json.loan.id;
-  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId: loanR1, approve: true, tenorHari: 15 } });
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId: loanR1, approve: true } });
   ok(r.json.ok, 'tunai Rudi disetujui');
   r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'manual-pay', loanId: loanR1, schedIdx: 0 } });
   ok(r.json.ok && r.json.loan.status === 'lunas' && r.json.loan.lunasAt, 'tunai Rudi lunas, lunasAt tercatat');
   // langsung ajukan lagi -> 400 cooldown
-  r = await call('../api/loans', { method: 'POST', headers: auth(tR), body: { pokok: 200000, tenorHari: 15, metode: 'lunas' } });
+  r = await call('../api/loans', { method: 'POST', headers: auth(tR), body: { pokok: 200000 } });
   ok(r.status === 400 && /jeda 3 hari/i.test(r.json.error), 'pengajuan langsung setelah lunas ditolak (cooldown)');
   // simulasikan 4 hari berlalu -> boleh mengajukan lagi
   const lr = await getJSON('loan:' + loanR1);
   lr.lunasAt = new Date(Date.now() - 4 * 864e5).toISOString();
   await setJSON('loan:' + loanR1, lr);
-  r = await call('../api/loans', { method: 'POST', headers: auth(tR), body: { pokok: 200000, tenorHari: 15, metode: 'lunas' } });
+  r = await call('../api/loans', { method: 'POST', headers: auth(tR), body: { pokok: 200000 } });
   ok(r.json.ok, 'pengajuan setelah 3 hari diterima lagi');
   // helper cooldownRemaining
   ok(calc.cooldownRemaining([{ status: 'lunas', lunasAt: new Date().toISOString() }]) > 0, 'cooldownRemaining > 0 saat baru lunas');
   ok(calc.cooldownRemaining([{ status: 'lunas', lunasAt: new Date(Date.now() - 4 * 864e5).toISOString() }]) === 0, 'cooldownRemaining = 0 setelah 3 hari');
   ok(calc.cooldownRemaining([{ status: 'lunas' }]) === 0, 'tanpa lunasAt tidak kena cooldown');
+
+  // ============ v2.5: tutup buku tanggal 1 ============
+  // helper tanggal: 18 Okt -> 14 hari ke 1 Nov; 1 Okt -> 31 hari ke 1 Nov;
+  // 1 Nov -> 30 hari ke 1 Des; 15 Feb 2026 -> 14 hari ke 1 Mar
+  ok(calc.daysToNextFirst(new Date('2026-10-18')) === 14, 'tutup buku: 18 Okt -> 14 hari');
+  ok(calc.daysToNextFirst(new Date('2026-10-01')) === 31, 'tutup buku: 1 Okt -> 31 hari (sebulan penuh)');
+  ok(calc.daysToNextFirst(new Date('2026-11-01')) === 30, 'tutup buku: 1 Nov -> 30 hari');
+  ok(calc.daysToNextFirst(new Date('2026-02-15')) === 14, 'tutup buku: 15 Feb -> 14 hari');
+  ok(calc.localDateStr(calc.nextFirstDate(new Date('2026-10-18'))) === '2026-11-01', 'tutup buku: tanggal 1 bulan depan');
+  ok(calc.localDateStr(calc.nextFirstDate(new Date('2026-10-31T00:30:00+07:00'))) === '2026-11-01', 'tutup buku: tanpa geser UTC di WIB');
+  // pengajuan baru: tanpa tenor/metode, flag tutupBuku
+  r = await call('../api/loans', { method: 'POST', headers: auth(tJ), body: { pokok: 200000 } });
+  ok(r.json.ok && r.json.loan.tutupBuku === true && r.json.loan.metode === 'lunas', 'pengajuan baru bertanda tutup buku');
+  ok(r.json.loan.tenorProposal === calc.daysToNextFirst(new Date()), 'tenorProposal = hari sampai tanggal 1');
+  const loanTB = r.json.loan.id;
+  // approve: jatuh tempo persis tanggal 1, 1 tagihan
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId: loanTB, approve: true } });
+  ok(r.json.ok && r.json.loan.schedule.length === 1, 'approve tutup buku: 1 tagihan');
+  ok(r.json.loan.schedule[0].dueDate === calc.localDateStr(calc.nextFirstDate(new Date())), 'approve tutup buku: jatuh tempo tanggal 1');
+  ok(r.json.loan.total === calc.calcLoan(200000, calc.daysToNextFirst(new Date()), 'lunas').total, 'approve tutup buku: total sesuai hari');
+  // simulate: pokok saja, konsisten dengan approve
+  r = await call('../api/simulate', { method: 'POST', headers: auth(tJ), body: { pokok: 200000 } });
+  ok(r.json.ok && r.json.days === calc.daysToNextFirst(new Date()) && r.json.dueDate === calc.localDateStr(calc.nextFirstDate(new Date())), 'simulate tutup buku konsisten');
 
   console.log(`\nSEMUA TES LOLOS (${n} asersi)`);
 })().catch((e) => {

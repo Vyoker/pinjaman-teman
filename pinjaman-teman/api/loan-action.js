@@ -5,7 +5,7 @@
 //        (syarat: belum ada pembayaran sama sekali)
 const { getJSON, setJSON, nextId, ensureStats } = require('../lib/store');
 const { requireAuth, readBody, send } = require('../lib/auth');
-const { calcLoan, MIN_TENOR, maxTenorFor, calcLateFee, todayStr, formatRp } = require('../lib/calc');
+const { calcLoan, MIN_TENOR, maxTenorFor, calcLateFee, todayStr, formatRp, daysToNextFirst, nextFirstDate, localDateStr } = require('../lib/calc');
 const { isPencairanComplete } = require('../lib/profile');
 const { audit } = require('../lib/audit');
 
@@ -25,13 +25,22 @@ async function decide(res, loan, body, actor) {
   if (!isPencairanComplete(borrower || {})) {
     return send(res, 400, { ok: false, error: 'Peminjam belum mengisi data pencairan (Dana/ShopeePay/ATM).' });
   }
-  const tn = body.tenorHari === undefined || body.tenorHari === null ? loan.tenorProposal : Number(body.tenorHari);
-  const maxTenor = maxTenorFor((borrower && borrower.stats && borrower.stats.loansLunas) || 0);
-  if (!Number.isInteger(tn) || tn < MIN_TENOR || tn > maxTenor) {
-    return send(res, 400, { ok: false, error: `Tenor harus ${MIN_TENOR}-${maxTenor} hari (maks rank peminjam).` });
-  }
-  const sim = calcLoan(loan.pokok, tn, loan.metode, maxTenor);
   const now = Date.now();
+  let tn, metode;
+  if (loan.tutupBuku) {
+    // v2.5: tutup buku — jatuh tempo tanggal 1 bulan depan dari pencairan
+    tn = daysToNextFirst(new Date(now));
+    metode = 'lunas';
+  } else {
+    // Pinjaman lama (diajukan sebelum v2.5): pakai tenor & metode awal
+    tn = body.tenorHari === undefined || body.tenorHari === null ? loan.tenorProposal : Number(body.tenorHari);
+    const maxTenor = maxTenorFor((borrower && borrower.stats && borrower.stats.loansLunas) || 0);
+    if (!Number.isInteger(tn) || tn < MIN_TENOR || tn > maxTenor) {
+      return send(res, 400, { ok: false, error: `Tenor harus ${MIN_TENOR}-${maxTenor} hari (maks rank peminjam).` });
+    }
+    metode = loan.metode;
+  }
+  const sim = calcLoan(loan.pokok, tn, metode);
   loan.tenorHari = tn;
   loan.nCicilan = sim.nCicilan;
   loan.bunga = sim.bunga;
@@ -39,19 +48,23 @@ async function decide(res, loan, body, actor) {
   loan.total = sim.total;
   loan.schedule = sim.schedule.map((s) => ({
     ...s,
-    dueDate: new Date(now + s.dueInDays * DAY).toISOString().slice(0, 10),
+    // v2.5 tutup buku: jatuh tempo persis tanggal 1 (tanpa geser UTC)
+    dueDate: loan.tutupBuku
+      ? localDateStr(nextFirstDate(new Date(now)))
+      : new Date(now + s.dueInDays * DAY).toISOString().slice(0, 10),
     status: 'belum', // belum | diklaim | lunas
     paidAt: null,
     payMethod: null,
     claimId: null,
   }));
   loan.status = 'berjalan';
+  loan.metode = metode;
   loan.approvedAt = new Date(now).toISOString();
   loan.disbursedAt = loan.approvedAt; // cair manual saat disetujui
   await setJSON('loan:' + loan.id, loan);
   ensureStats(borrower).totalPinjam += loan.pokok;
   await setJSON('user:' + loan.borrowerPhone, borrower);
-  await audit('setujui-pinjaman', actor, `${loan.id} (${loan.borrowerName}): pokok ${formatRp(loan.pokok)}, tenor ${tn} hari, ${loan.metode}, total ${formatRp(loan.total)}.`);
+  await audit('setujui-pinjaman', actor, `${loan.id} (${loan.borrowerName}): pokok ${formatRp(loan.pokok)}, tenor ${tn} hari, ${metode}, total ${formatRp(loan.total)}.`);
   return send(res, 200, { ok: true, loan });
 }
 

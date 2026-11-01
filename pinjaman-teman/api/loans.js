@@ -1,10 +1,11 @@
 'use strict';
 // /api/loans
 //   GET  -> daftar pinjaman (peminjam: milik sendiri; admin: semua, ?status=)
-//   POST (peminjam) { pokok, tenorHari, metode } -> ajukan pinjaman (status 'diajukan')
+//   POST (peminjam) { pokok } -> ajukan pinjaman (status 'diajukan');
+//     v2.5: tenor & metode ditentukan sistem (tutup buku tanggal 1).
 const { getJSON, setJSON, nextId } = require('../lib/store');
 const { requireAuth, readBody, send } = require('../lib/auth');
-const { MIN_TENOR, calcLateFee, todayStr, maxTenorFor, COOLDOWN_MS, cooldownRemaining } = require('../lib/calc');
+const { calcLateFee, todayStr, cooldownRemaining, daysToNextFirst } = require('../lib/calc');
 const { effectiveLimit } = require('../lib/profile');
 
 async function idxPush(key, val) {
@@ -49,32 +50,19 @@ module.exports = requireAuth(async (req, res) => {
     const status = url.searchParams.get('status') || '';
     const filter = sess.role === 'admin' ? { status } : { phone: sess.phone, status };
     const loans = await listLoans(filter);
-    // Admin perlu tahu tenor maksimum tiap peminjam (unlock rank) saat menyetujui
-    if (sess.role === 'admin') {
-      for (const l of loans) {
-        const u = await getJSON('user:' + l.borrowerPhone);
-        l.maxTenor = maxTenorFor((u && u.stats && u.stats.loansLunas) || 0);
-      }
-    }
     return send(res, 200, { ok: true, loans });
   }
 
   if (req.method === 'POST') {
     if (sess.role !== 'borrower') return send(res, 403, { ok: false, error: 'Hanya peminjam.' });
     try {
-      const { pokok, tenorHari, metode } = await readBody(req);
+      // v2.5: tutup buku — pengajuan hanya membawa pokok; tenor & metode
+      // ditentukan sistem (sekali lunas, jatuh tempo tanggal 1 bulan depan).
+      const { pokok } = await readBody(req);
       const pk = Number(pokok);
-      const tn = Number(tenorHari);
       if (!Number.isInteger(pk) || pk <= 0) return send(res, 400, { ok: false, error: 'Pokok tidak valid.' });
-      if (metode !== 'lunas' && metode !== 'cicilan') {
-        return send(res, 400, { ok: false, error: 'Metode pelunasan tidak valid.' });
-      }
       const user = await getJSON('user:' + sess.phone);
       if (!user || user.status !== 'active') return send(res, 403, { ok: false, error: 'Akun tidak aktif.' });
-      const maxTenor = maxTenorFor((user.stats && user.stats.loansLunas) || 0);
-      if (!Number.isInteger(tn) || tn < MIN_TENOR || tn > maxTenor) {
-        return send(res, 400, { ok: false, error: `Tenor harus ${MIN_TENOR}-${maxTenor} hari.` });
-      }
       if (pk > effectiveLimit(user)) {
         return send(res, 400, { ok: false, error: 'Pokok melebihi limit kamu.' });
       }
@@ -92,7 +80,8 @@ module.exports = requireAuth(async (req, res) => {
       const id = await nextId('loan');
       const loan = {
         id, borrowerPhone: sess.phone, borrowerName: user.name,
-        pokok: pk, tenorProposal: tn, tenorHari: null, metode,
+        pokok: pk, tenorProposal: daysToNextFirst(new Date()), tenorHari: null, metode: 'lunas',
+        tutupBuku: true, // v2.5: jatuh tempo tanggal 1 bulan depan
         nCicilan: null, bunga: null, biayaLayanan: null, total: null,
         schedule: [], status: 'diajukan',
         createdAt: new Date().toISOString(), approvedAt: null, disbursedAt: null,
