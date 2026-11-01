@@ -93,6 +93,23 @@ Total tagihan = Pokok + (Pokok x 0,2% x tenor hari) + Rp 2.000 (biaya layanan)
   (per jenis: pelunasan tunai tidak menghalangi pengajuan gadai).
   Berlaku untuk pelunasan via konfirmasi klaim maupun tandai tunai;
   menu Ajukan/Gadai menampilkan tanggal kapan boleh mengajukan lagi.
+- **v2.4 (rank dari pelunasan penuh + hapus gadai)**: tier rank kini
+  dihitung dari jumlah pinjaman yang lunas penuh per pengajuan
+  (1 pelunasan = 1 hitungan), bukan jumlah item pembayaran: Bronze 1x,
+  Silver 3x, Gold 5x, Platinum 8x, Diamond 12x (bonus & tenor unlock
+  tetap). Seluruh fitur pegadaian dihapus: menu Gadai, menu
+  Inventaris, aksi terima/serahkan barang, dan cabang gadai di
+  pengajuan. Pinjaman gadai lama yang sudah berjalan tetap bisa
+  dibayar sampai lunas lewat alur normal; pengajuan gadai baru sudah
+  tidak bisa dibuat.
+- **v2.5 (tutup buku tanggal 1)**: tenor dikunci ke tanggal 1 bulan
+  depan — semua pinjaman baru jatuh tempo tanggal 1, sekali lunas,
+  bunga harian dihitung dari tanggal cair sampai tanggal 1 tersebut
+  (mulai tgl 18 -> 14 hari; mulai tgl 1 -> sebulan penuh sampai tgl 1
+  berikutnya). Slider tenor & pilihan cicilan dihapus dari pengajuan;
+  unlock tenor rank tidak berlaku lagi (bonus limit rank tetap).
+  Pinjaman yang masih berjalan & pengajuan lama tidak diubah (flag
+  `tutupBuku` membedakan keduanya saat persetujuan).
 
 ## Arsitektur
 

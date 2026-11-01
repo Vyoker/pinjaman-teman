@@ -11,7 +11,7 @@ const { audit } = require('../lib/audit');
 function shape(user) {
   const profile = ensureProfile(user);
   const bonus = limitBonus(profile);
-  const rankBonus = rankBonusFor((user.stats && user.stats.payments) || 0);
+  const rankBonus = rankBonusFor((user.stats && user.stats.loansLunas) || 0);
   return {
     ok: true,
     name: user.name,
@@ -99,7 +99,7 @@ module.exports = requireAuth(async (req, res) => {
       return send(res, 200, {
         ok: true, field, status: cur.status,
         bonus: limitBonus(tProfile), effectiveLimit: effectiveLimit(target),
-        rankBonus: rankBonusFor((target.stats && target.stats.payments) || 0),
+        rankBonus: rankBonusFor((target.stats && target.stats.loansLunas) || 0),
       });
     }
     // Peminjam: kirim/ubah satu data

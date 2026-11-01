@@ -15,7 +15,7 @@ async function listUsers() {
     const u = await getJSON('user:' + ph);
     if (!u) continue;
     const stats = ensureStats(u);
-    const { current } = rankFor(stats.payments);
+    const { current } = rankFor(stats.loansLunas);
     out.push({
       name: u.name, phone: u.phone, status: u.status, limit: u.limit,
       createdAt: u.createdAt, stats, rank: current ? current.name : null,
