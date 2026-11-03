@@ -4,7 +4,7 @@
 //   POST { phone, approve, limit }   -> setujui/tolak pendaftaran + atur limit
 //   POST { action:'delete', phone }  -> hapus akun permanen (tanpa pinjaman aktif)
 const { getJSON, setJSON, ensureStats, kv, nextId } = require('../lib/store');
-const { requireAuth, readBody, send, normPhone, destroyAllSessions } = require('../lib/auth');
+const { requireAuth, readBody, send, normPhone, destroyAllSessions, hashPassword } = require('../lib/auth');
 const { rankFor, formatRp } = require('../lib/calc');
 const { audit } = require('../lib/audit');
 
@@ -20,6 +20,7 @@ async function listUsers() {
       name: u.name, phone: u.phone, status: u.status, limit: u.limit,
       createdAt: u.createdAt, stats, rank: current ? current.name : null,
       pencairan: u.pencairan || null,
+      profile: u.profile || null, // v2.6: detail data user untuk admin
     });
   }
   return out;
@@ -34,6 +35,16 @@ module.exports = requireAuth(async (req, res) => {
       const out = [];
       for (const ph of ids) {
         const rq = await getJSON('logoutreq:' + ph);
+        if (rq && rq.status === 'menunggu') out.push(rq);
+      }
+      return send(res, 200, { ok: true, requests: out });
+    }
+    // v2.6: daftar permintaan reset password yang menunggu
+    if (url.searchParams.get('view') === 'reset-requests') {
+      const ids = (await getJSON('idx:resetreqs')) || [];
+      const out = [];
+      for (const ph of ids) {
+        const rq = await getJSON('resetreq:' + ph);
         if (rq && rq.status === 'menunggu') out.push(rq);
       }
       return send(res, 200, { ok: true, requests: out });
@@ -66,6 +77,37 @@ module.exports = requireAuth(async (req, res) => {
         ids.push(nid);
         await setJSON('idx:notifs', ids);
         await audit('logout-semua-disetujui', actor, `${rq.name} (${ph}): ${n} sesi dihanguskan.`);
+        return send(res, 200, { ok: true, sessions: n });
+      }
+      // v2.6: admin reset password peminjam (kata sandi tidak bisa dilihat,
+      // hanya bisa diganti baru karena tersimpan sebagai hash)
+      if (body.action === 'reset-password') {
+        const ph = normPhone(body.phone);
+        const newPw = String(body.newPassword || '');
+        if (newPw.length < 8) {
+          return send(res, 400, { ok: false, error: 'Password baru minimal 8 karakter.' });
+        }
+        const target = await getJSON('user:' + ph);
+        if (!target) return send(res, 404, { ok: false, error: 'Peminjam tidak ditemukan.' });
+        target.pass = hashPassword(newPw);
+        await setJSON('user:' + ph, target);
+        const n = await destroyAllSessions(ph);
+        const rq = await getJSON('resetreq:' + ph);
+        if (rq && rq.status === 'menunggu') {
+          rq.status = 'disetujui';
+          rq.decidedAt = new Date().toISOString();
+          await setJSON('resetreq:' + ph, rq);
+        }
+        const nid = await nextId('notif');
+        await setJSON('notif:' + nid, {
+          id: nid, to: ph, targetName: target.name,
+          message: 'Password akunmu sudah direset oleh admin. Silakan login dengan password baru yang diberikan admin, lalu segera ganti di menu Akun.',
+          createdAt: new Date().toISOString(), kind: 'reset-password',
+        });
+        const ids = (await getJSON('idx:notifs')) || [];
+        ids.push(nid);
+        await setJSON('idx:notifs', ids);
+        await audit('reset-password', actor, `${target.name} (${ph}): password direset admin, ${n} sesi dihanguskan.`);
         return send(res, 200, { ok: true, sessions: n });
       }
       const { approve, limit } = body;

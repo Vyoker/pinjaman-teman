@@ -1,7 +1,7 @@
 'use strict';
 /* Pinjaman Teman — SPA frontend (Bootstrap 5 + animasi) */
 
-const APP_VERSION = '2.5.0';
+const APP_VERSION = '2.6.0';
 const $ = (s) => document.querySelector(s);
 /** Pasang handler ke semua elemen yang cocok (pengganti pola querySelectorAll berulang). */
 const bindAll = (sel, ev, fn) => document.querySelectorAll(sel).forEach((el) => el.addEventListener(ev, fn));
@@ -180,9 +180,26 @@ function vLogin() {
         <input id="f-pass" class="form-control" type="password" placeholder="Password">
         <button class="btn btn-primary w-100 mt-3" id="b-login"><i class="bi bi-box-arrow-in-right me-2"></i>Masuk</button>
       </div>
-      <p class="link-row anim-in" style="--d:260ms">Belum punya akun? <a href="#" id="to-reg">Daftar</a></p>
+      <p class="link-row anim-in" style="--d:260ms">Belum punya akun? <a href="#" id="to-reg">Daftar</a> &middot; <a href="#" id="to-forgot">Lupa password?</a></p>
+      <div id="forgot-box" class="card anim-in" style="display:none">
+        <label class="form-label">Nomor HP terdaftar</label>
+        <input id="f-forgot-phone" class="form-control" inputmode="numeric" placeholder="08xxxxxxxxxx">
+        <button class="btn btn-outline-light w-100 mt-2" id="b-forgot"><i class="bi bi-key-fill me-2"></i>Minta Reset Password</button>
+        <p class="muted mt-2 mb-0" style="font-size:12px">Admin akan menetapkan password baru untukmu. Hubungi admin setelah mengajukan.</p>
+      </div>
     </div>`;
   $('#to-reg').addEventListener('click', (e) => { e.preventDefault(); go('register'); });
+  $('#to-forgot').addEventListener('click', (e) => {
+    e.preventDefault();
+    const box = $('#forgot-box');
+    box.style.display = box.style.display === 'none' ? '' : 'none';
+  });
+  $('#b-forgot').addEventListener('click', async () => {
+    try {
+      const j = await api('/api/auth', 'POST', { action: 'forgot-request', phone: $('#f-forgot-phone').value });
+      toast(j.message || 'Permintaan terkirim. Hubungi admin.');
+    } catch (e) { toast(e.message, true); }
+  });
   const doLogin = async () => {
     try {
       const j = await api('/api/auth', 'POST', {
@@ -705,9 +722,19 @@ async function vKlaim() {
 async function vPeminjam() {
   const { borrowers } = await api('/api/borrowers');
   const { requests } = await api('/api/borrowers?view=logout-requests');
+  const { requests: resetReqs } = await api('/api/borrowers?view=reset-requests');
   const pend = borrowers.filter((b) => b.status === 'pending');
   const act = borrowers.filter((b) => b.status === 'active');
   main.innerHTML = `
+    ${(resetReqs && resetReqs.length) ? `<div class="section-title">Permintaan reset password (${resetReqs.length})</div>
+    ${resetReqs.map((q, i) => `
+      <div${stagger(i, 'card')} style="border-color:rgba(125,211,252,.4)"><div class="d-flex justify-content-between align-items-center">
+        <div><strong>${esc(q.name)}</strong><div class="muted">${esc(q.phone)} &middot; diminta ${fmtDate(q.createdAt)}</div></div>
+      </div>
+      <div class="d-flex gap-2 mt-2"><input type="password" id="rp-${esc(q.phone)}" class="form-control" placeholder="Password baru (min. 8 karakter)">
+      <button class="btn btn-primary btn-sm" data-resetok="${esc(q.phone)}"><i class="bi bi-key-fill me-1"></i>Reset</button></div>
+      <p class="muted mb-0 mt-1" style="font-size:12px">Sampaikan password baru ini ke peminjam. Semua sesi login mereka akan dihanguskan.</p>
+      </div>`).join('')}` : ''}
     ${(requests && requests.length) ? `<div class="section-title">Permintaan logout semua perangkat (${requests.length})</div>
     ${requests.map((q, i) => `
       <div${stagger(i, 'card')} style="border-color:rgba(232,194,106,.4)"><div class="d-flex justify-content-between align-items-center">
@@ -725,6 +752,7 @@ async function vPeminjam() {
           <button class="btn btn-primary btn-sm flex-fill" data-ok="${b.phone}"><i class="bi bi-check-lg me-1"></i>Setujui</button>
           <button class="btn btn-danger btn-sm flex-fill" data-no="${b.phone}"><i class="bi bi-x-lg me-1"></i>Tolak</button>
         </div>
+        <button class="btn btn-outline-light btn-sm w-100 mt-2" data-detail="${b.phone}"><i class="bi bi-person-lines-fill me-1"></i>Lihat Data Lengkap</button>
         <button class="btn btn-outline-danger btn-sm w-100 mt-2" data-del="${b.phone}"><i class="bi bi-trash-fill me-1"></i>Hapus Akun</button>
       </div>`).join('') || `<div class="card anim-in"><p class="muted mb-0">Tidak ada.</p></div>`}
     <div class="section-title">Peminjam aktif (${act.length})</div>
@@ -736,6 +764,7 @@ async function vPeminjam() {
         <label class="form-label">Limit (Rp)</label>
         <div class="d-flex gap-2"><input type="number" id="l-${b.phone}" class="form-control" value="${b.limit}">
         <button class="btn btn-outline-light btn-sm" data-lim="${b.phone}">Simpan</button></div>
+        <button class="btn btn-outline-light btn-sm w-100 mt-2" data-detail="${b.phone}"><i class="bi bi-person-lines-fill me-1"></i>Lihat Data Lengkap</button>
         <button class="btn btn-outline-danger btn-sm w-100 mt-2" data-del="${b.phone}"><i class="bi bi-trash-fill me-1"></i>Hapus Akun</button>
       </div>`).join('') || `<div class="card anim-in"><p class="muted mb-0">Belum ada.</p></div>`}`;
   main.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
@@ -766,6 +795,20 @@ async function vPeminjam() {
       toast('Limit diperbarui.');
     } catch (e) { toast(e.message, true); }
   }));
+  main.querySelectorAll('[data-detail]').forEach((b) => b.addEventListener('click', () => {
+    const u = borrowers.find((x) => x.phone === b.dataset.detail);
+    if (u) showBorrowerDetail(u);
+  }));
+  main.querySelectorAll('[data-resetok]').forEach((b) => b.addEventListener('click', async () => {
+    const np = $('#rp-' + b.dataset.resetok).value;
+    if (!np || np.length < 8) { toast('Password baru minimal 8 karakter.', true); return; }
+    if (!confirm(`Reset password untuk ${b.dataset.resetok}? Semua sesi login mereka akan dihanguskan.`)) return;
+    try {
+      const j = await api('/api/borrowers', 'POST', { action: 'reset-password', phone: b.dataset.resetok, newPassword: np });
+      toast(`Password direset. ${j.sessions || 0} sesi dihanguskan. Sampaikan password baru ke peminjam.`);
+      go('peminjam');
+    } catch (e) { toast(e.message, true); }
+  }));
   main.querySelectorAll('[data-logoutok]').forEach((b) => b.addEventListener('click', async () => {
     if (!confirm(`Setujui logout semua perangkat untuk ${b.dataset.logoutok}? Semua sesi login mereka akan dihanguskan.`)) return;
     try {
@@ -774,6 +817,57 @@ async function vPeminjam() {
       go('peminjam');
     } catch (e) { toast(e.message, true); }
   }));
+}
+
+/** v2.6: modal data lengkap 1 user untuk admin (lihat + unduh foto). */
+const DETAIL_LABELS = {
+  namaLengkap: 'Nama lengkap', usia: 'Usia', jenisKelamin: 'Jenis kelamin',
+  tanggalLahir: 'Tanggal lahir', noKK: 'Nomor KK', noNIK: 'Nomor NIK',
+  alamat: 'Alamat', pekerjaan: 'Pekerjaan', fotoKTP: 'Foto KTP', fotoKK: 'Foto KK',
+};
+function showBorrowerDetail(u) {
+  let m = $('#detailModal');
+  if (!m) {
+    document.body.insertAdjacentHTML('beforeend', `
+      <div class="modal fade" id="detailModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+          <div class="modal-content" style="background:#101a14;border:1px solid #e8c26a55">
+            <div class="modal-header" style="border-color:#ffffff18">
+              <h5 class="modal-title mb-0"><i class="bi bi-person-lines-fill me-2"></i>Data Peminjam</h5>
+              <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Tutup"></button>
+            </div>
+            <div class="modal-body" id="detailModalBody"></div>
+          </div>
+        </div>
+      </div>`);
+    m = $('#detailModal');
+  }
+  const prof = u.profile || {};
+  const order = ['namaLengkap', 'usia', 'jenisKelamin', 'tanggalLahir', 'noKK', 'noNIK', 'alamat', 'pekerjaan', 'fotoKTP', 'fotoKK'];
+  const rows = order.map((k) => {
+    const f = prof[k] || { value: '', status: 'belum' };
+    if (k === 'fotoKTP' || k === 'fotoKK') {
+      if (!f.value) return `<div class="kv"><span class="k">${DETAIL_LABELS[k]}</span><span class="v muted">Belum diisi</span></div>`;
+      const fn = (k === 'fotoKTP' ? 'KTP' : 'KK') + '-' + u.phone + '.jpg';
+      return `<div class="kv"><span class="k">${DETAIL_LABELS[k]}</span><span class="v">${badge(f.status)}</span></div>
+        <div class="text-center mb-2"><img src="${f.value}" class="img-fluid rounded" alt="${DETAIL_LABELS[k]}" style="max-height:220px">
+        <div><a class="btn btn-outline-light btn-sm mt-2" href="${f.value}" download="${fn}"><i class="bi bi-download me-1"></i>Unduh ${DETAIL_LABELS[k]}</a></div></div>`;
+    }
+    return `<div class="kv"><span class="k">${DETAIL_LABELS[k]}</span><span class="v">${f.value ? esc(String(f.value)) : '<span class="muted">Belum diisi</span>'} ${badge(f.status)}</span></div>`;
+  }).join('');
+  const pc = u.pencairan;
+  $('#detailModalBody').innerHTML = `
+    <div class="d-flex justify-content-between align-items-center mb-2"><strong>${esc(u.name)}</strong>${badge(u.status)}</div>
+    <div class="kv"><span class="k">Nomor HP</span><span class="v">${esc(u.phone)}</span></div>
+    <div class="kv"><span class="k">Limit</span><span class="v">${fmtRp(u.limit)}</span></div>
+    <div class="kv"><span class="k">Rank</span><span class="v">${u.rank ? esc(u.rank) : 'Belum ada rank'} &middot; ${u.stats.loansLunas}x lunas</span></div>
+    <h4 class="mt-3">Data diri</h4>${rows}
+    <h4 class="mt-3">Data pencairan</h4>
+    ${pc ? `<div class="kv"><span class="k">Metode</span><span class="v">${esc(pc.metode)}${pc.namaBank ? ' ' + esc(pc.namaBank) : ''}</span></div>
+    <div class="kv"><span class="k">Nomor</span><span class="v">${esc(pc.nomor)}</span></div>
+    <div class="kv"><span class="k">Atas nama</span><span class="v">${esc(pc.atasNama)}</span></div>`
+    : '<p class="muted mb-0">Belum diisi.</p>'}`;
+  bootstrap.Modal.getOrCreateInstance(m).show();
 }
 
 async function vPengaturan() {

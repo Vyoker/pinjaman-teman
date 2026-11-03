@@ -126,6 +126,25 @@ async function register(req, body, res) {
 }
 
 /** Ganti password sendiri (peminjam) — butuh password lama (v2.0). */
+/** v2.6: peminjam mengajukan lupa password — admin yang meresetnya. */
+async function forgotRequest(body, res) {
+  const ph = normPhone(body.phone);
+  if (!ph) return send(res, 400, { ok: false, error: 'Nomor HP wajib diisi.' });
+  const user = await getJSON('user:' + ph);
+  // Selalu balas ok agar tidak membocorkan apakah nomor terdaftar.
+  if (user) {
+    const existing = await getJSON('resetreq:' + ph);
+    if (!existing || existing.status !== 'menunggu') {
+      await setJSON('resetreq:' + ph, {
+        phone: ph, name: user.name, createdAt: new Date().toISOString(), status: 'menunggu',
+      });
+      const ids = (await getJSON('idx:resetreqs')) || [];
+      if (!ids.includes(ph)) { ids.push(ph); await setJSON('idx:resetreqs', ids); }
+    }
+  }
+  return send(res, 200, { ok: true, message: 'Permintaan terkirim. Hubungi admin untuk password barumu.' });
+}
+
 async function changePassword(req, body, res) {
   const sess = await getSession(req);
   if (!sess || sess.role !== 'borrower') return send(res, 401, { ok: false, error: 'Belum login.' });
@@ -150,6 +169,7 @@ module.exports = async (req, res) => {
     if (body.action === 'login') return await login(body, res);
     if (body.action === 'register') return await register(req, body, res);
     if (body.action === 'change-password') return await changePassword(req, body, res);
+    if (body.action === 'forgot-request') return await forgotRequest(body, res);
     return send(res, 400, { ok: false, error: 'Aksi tidak dikenal.' });
   } catch (e) {
     console.error('[auth]', e);

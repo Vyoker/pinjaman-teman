@@ -88,11 +88,14 @@ function ok(cond, label) {
   const lfEarly = calc.calcLateFee(133000, '2026-10-10', '2026-10-06');
   ok(lfEarly.daysLate === 0 && lfEarly.lateFee === 0, 'bayar lebih awal = tanpa denda');
   ok(calc.rankFor(0).current === null && calc.rankFor(0).next.name === 'Bronze', 'rank 0 pelunasan');
-  ok(calc.rankFor(1).current.name === 'Bronze' && calc.rankFor(1).next.name === 'Silver', 'rank 1 = Bronze, next Silver');
-  ok(calc.rankFor(3).current.name === 'Silver' && calc.rankFor(3).next.name === 'Gold', 'rank 3 = Silver, next Gold');
-  ok(calc.rankFor(5).current.name === 'Gold' && calc.rankFor(5).next.name === 'Platinum', 'rank 5 = Gold, next Platinum');
-  ok(calc.rankFor(8).current.name === 'Platinum' && calc.rankFor(8).next.name === 'Diamond', 'rank 8 = Platinum, next Diamond');
-  ok(calc.rankFor(12).current.name === 'Diamond' && calc.rankFor(12).next === null, 'rank 12 = Diamond (max)');
+  ok(calc.rankFor(4).current === null && calc.rankFor(4).next.name === 'Bronze', 'rank 4 = belum ada rank');
+  ok(calc.rankFor(5).current.name === 'Bronze' && calc.rankFor(5).next.name === 'Silver', 'rank 5 = Bronze, next Silver');
+  ok(calc.rankFor(10).current.name === 'Silver' && calc.rankFor(10).next.name === 'Gold', 'rank 10 = Silver, next Gold');
+  ok(calc.rankFor(15).current.name === 'Gold' && calc.rankFor(15).next.name === 'Platinum', 'rank 15 = Gold, next Platinum');
+  ok(calc.rankFor(20).current.name === 'Platinum' && calc.rankFor(20).next.name === 'Diamond', 'rank 20 = Platinum, next Diamond');
+  ok(calc.rankFor(25).current.name === 'Diamond' && calc.rankFor(25).next.name === 'KING', 'rank 25 = Diamond, next KING');
+  ok(calc.rankFor(30).current.name === 'KING' && calc.rankFor(30).next === null, 'rank 30 = KING (max)');
+  ok(calc.rankBonusFor(5) === 10000 && calc.rankBonusFor(10) === 15000 && calc.rankBonusFor(15) === 20000 && calc.rankBonusFor(20) === 25000 && calc.rankBonusFor(25) === 50000 && calc.rankBonusFor(30) === 100000, 'bonus rank v2.6');
 
   console.log('== Tes profil & bonus limit ==');
   const prof = require('../lib/profile');
@@ -186,7 +189,7 @@ function ok(cond, label) {
   r = await call('../api/me', { method: 'GET', headers: auth(tB) });
   ok(r.json.stats.payments === 1 && r.json.stats.loansLunas === 1 && r.json.stats.totalPinjam === 500000,
     'statistik: 1 bayar, 1 lunas, total pinjam 500rb');
-  ok(r.json.rank && r.json.rank.name === 'Bronze' && r.json.nextRank.name === 'Silver', 'rank Bronze setelah 1 pelunasan');
+  ok(r.json.rank === null && r.json.nextRank.name === 'Bronze', 'v2.6: 1 pelunasan belum ada rank (Bronze butuh 5)');
 
   // 18. pinjaman kedua, jatuh tempo dimundurkan 5 hari -> kena denda
   // v2.3: cooldown 3 hari setelah pelunasan -> mundurkan lunasAt pinjaman pertama
@@ -471,19 +474,19 @@ function ok(cond, label) {
   await setJSON('user:081900000005', uF);
   // me: bonus rank Platinum (unlock tenor sudah tidak berlaku di v2.5)
   r = await call('../api/me', { method: 'GET', headers: auth(tF) });
-  ok(r.json.rankBonus === 25000, 'Platinum: rankBonus 25000');
-  ok(r.json.effectiveLimit === 525000, 'effectiveLimit = 500rb + 25rb bonus rank');
-  ok(r.json.rank && r.json.rank.name === 'Platinum', 'rank Platinum terdeteksi');
+  ok(r.json.rankBonus === 10000, 'v2.6: 8 lunas -> Bronze, rankBonus 10000');
+  ok(r.json.effectiveLimit === 510000, 'effectiveLimit = 500rb + 10rb bonus rank');
+  ok(r.json.rank && r.json.rank.name === 'Bronze', 'rank Bronze terdeteksi (rombak retroaktif)');
   // apply: pokok di atas limit+bonus rank ditolak
-  r = await call('../api/loans', { method: 'POST', headers: auth(tF), body: { pokok: 526000 } });
-  ok(r.status === 400 && /limit/i.test(r.json.error), 'pokok 526rb > 525rb ditolak');
-  r = await call('../api/loans', { method: 'POST', headers: auth(tF), body: { pokok: 525000 } });
-  ok(r.json.ok && r.json.loan.tutupBuku === true && r.json.loan.metode === 'lunas', 'pengajuan Platinum diterima (tutup buku)');
+  r = await call('../api/loans', { method: 'POST', headers: auth(tF), body: { pokok: 511000 } });
+  ok(r.status === 400 && /limit/i.test(r.json.error), 'pokok 511rb > 510rb ditolak');
+  r = await call('../api/loans', { method: 'POST', headers: auth(tF), body: { pokok: 510000 } });
+  ok(r.json.ok && r.json.loan.tutupBuku === true && r.json.loan.metode === 'lunas', 'pengajuan Fajar diterima (tutup buku)');
   const loanF = r.json.loan.id;
   // simulate tutup buku: total sesuai hari sampai tanggal 1
   const daysF = calc.daysToNextFirst(new Date());
-  const totF = calc.calcLoan(525000, daysF, 'lunas').total;
-  r = await call('../api/simulate', { method: 'POST', headers: auth(tF), body: { pokok: 525000 } });
+  const totF = calc.calcLoan(510000, daysF, 'lunas').total;
+  r = await call('../api/simulate', { method: 'POST', headers: auth(tF), body: { pokok: 510000 } });
   ok(r.json.ok && r.json.days === daysF && r.json.total === totF && r.json.dueDate === calc.localDateStr(calc.nextFirstDate(new Date())), 'simulate tutup buku: total sesuai hari');
   // admin approve (butuh pencairan dulu)
   r = await call('../api/profile', { method: 'POST', headers: auth(tF), body: { action: 'pencairan', metode: 'dana', nomor: '081511112222', atasNama: 'Fajar Nugroho' } });
@@ -500,13 +503,13 @@ function ok(cond, label) {
   uG.stats = { payments: 55, loansLunas: 12, totalPinjam: 3000000 };
   await setJSON('user:081900000006', uG);
   r = await call('../api/me', { method: 'GET', headers: auth(tG) });
-  ok(r.json.rankBonus === 50000 && r.json.rank.name === 'Diamond', 'Diamond: bonus 50rb');
-  ok(r.json.effectiveLimit === 350000, 'effectiveLimit Gita = 300rb + 50rb');
-  r = await call('../api/loans', { method: 'POST', headers: auth(tG), body: { pokok: 350000 } });
-  ok(r.json.ok, 'pengajuan Diamond diterima (tutup buku, tanpa batas tenor rank)');
+  ok(r.json.rankBonus === 15000 && r.json.rank.name === 'Silver', 'v2.6: 12 lunas -> Silver, bonus 15rb');
+  ok(r.json.effectiveLimit === 315000, 'effectiveLimit Gita = 300rb + 15rb');
+  r = await call('../api/loans', { method: 'POST', headers: auth(tG), body: { pokok: 315000 } });
+  ok(r.json.ok, 'pengajuan Gita diterima (tutup buku)');
   // profile memuat rankBonus
   r = await call('../api/profile', { method: 'GET', headers: auth(tF) });
-  ok(r.json.rankBonus === 25000 && r.json.effectiveLimit === 525000, 'profile: rankBonus & effectiveLimit sinkron');
+  ok(r.json.rankBonus === 10000 && r.json.effectiveLimit === 510000, 'profile: rankBonus & effectiveLimit sinkron');
 
   // ============ v1.9: tandai lunas manual (tunai ke admin) ============
   r = await call('../api/auth', { method: 'POST', body: { action: 'register', name: 'Hadi', phone: '081900000007', password: 'hadi1234' } });
@@ -656,7 +659,7 @@ function ok(cond, label) {
   ok(r.status === 400 && /tidak dikenal/i.test(r.json.error), 'aksi terima-barang sudah tidak ada');
   r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'serahkan-barang', loanId: loanJ1, foto: PROOF } });
   ok(r.status === 400 && /tidak dikenal/i.test(r.json.error), 'aksi serahkan-barang sudah tidak ada');
-  // rank: 5 pembayaran tapi 0 pelunasan -> belum ada rank; 1 pelunasan -> Bronze
+  // rank v2.6: 0/1/3 pelunasan -> belum ada rank (Bronze butuh 5)
   const uJ = await getJSON('user:081900000009');
   uJ.stats = { payments: 5, loansLunas: 0, totalPinjam: 0 };
   await setJSON('user:081900000009', uJ);
@@ -665,11 +668,11 @@ function ok(cond, label) {
   uJ.stats = { payments: 5, loansLunas: 1, totalPinjam: 300000 };
   await setJSON('user:081900000009', uJ);
   r = await call('../api/me', { method: 'GET', headers: auth(tJ) });
-  ok(r.json.rank && r.json.rank.name === 'Bronze' && r.json.rankBonus === 10000, '1 pelunasan -> Bronze + bonus 10rb');
+  ok(r.json.rank === null && r.json.nextRank.name === 'Bronze', '1 pelunasan -> belum ada rank (v2.6)');
   uJ.stats = { payments: 30, loansLunas: 3, totalPinjam: 900000 };
   await setJSON('user:081900000009', uJ);
   r = await call('../api/me', { method: 'GET', headers: auth(tJ) });
-  ok(r.json.rank && r.json.rank.name === 'Silver', '3 pelunasan -> Silver');
+  ok(r.json.rank === null && r.json.nextRank.name === 'Bronze', '3 pelunasan -> belum ada rank (v2.6)');
 
   // ============ v2.3: jeda 3 hari setelah pelunasan ============
   r = await call('../api/auth', { method: 'POST', body: { action: 'register', name: 'Rudi', phone: '081900000010', password: 'rudi1234' } });
@@ -722,6 +725,33 @@ function ok(cond, label) {
   // simulate: pokok saja, konsisten dengan approve
   r = await call('../api/simulate', { method: 'POST', headers: auth(tJ), body: { pokok: 200000 } });
   ok(r.json.ok && r.json.days === calc.daysToNextFirst(new Date()) && r.json.dueDate === calc.localDateStr(calc.nextFirstDate(new Date())), 'simulate tutup buku konsisten');
+
+  // ============ v2.6: lupa password + detail user admin ============
+  r = await call('../api/auth', { method: 'POST', body: { action: 'forgot-request', phone: '081900000009' } });
+  ok(r.json.ok, 'forgot-request diterima (tanpa login)');
+  let rq = await getJSON('resetreq:081900000009');
+  ok(rq && rq.status === 'menunggu', 'permintaan reset tersimpan');
+  r = await call('../api/auth', { method: 'POST', body: { action: 'forgot-request', phone: '081900000009' } });
+  ok(r.json.ok, 'forgot-request kedua tetap ok (tidak ganda)');
+  r = await call('../api/auth', { method: 'POST', body: { action: 'forgot-request', phone: '089999999999' } });
+  ok(r.json.ok && !(await getJSON('resetreq:089999999999')), 'nomor tak dikenal tetap ok tanpa jejak');
+  r = await call('../api/borrowers', { method: 'GET', headers: auth(tA), url: '/api/borrowers?view=reset-requests' });
+  ok(r.json.requests.length === 1 && r.json.requests[0].phone === '081900000009', 'admin melihat permintaan reset');
+  r = await call('../api/borrowers', { method: 'GET', headers: auth(tJ), url: '/api/borrowers?view=reset-requests' });
+  ok(r.status === 403, 'peminjam ditolak melihat reset-requests');
+  r = await call('../api/borrowers', { method: 'POST', headers: auth(tA), body: { action: 'reset-password', phone: '081900000009', newPassword: 'pendek' } });
+  ok(r.status === 400, 'password baru < 8 karakter ditolak');
+  r = await call('../api/borrowers', { method: 'POST', headers: auth(tA), body: { action: 'reset-password', phone: '081900000009', newPassword: 'jokobaru123' } });
+  ok(r.json.ok, 'admin reset password berhasil');
+  rq = await getJSON('resetreq:081900000009');
+  ok(rq.status === 'disetujui', 'permintaan reset ditandai selesai');
+  r = await call('../api/auth', { method: 'POST', body: { action: 'login', phone: '081900000009', password: 'joko1234' } });
+  ok(!r.json.ok, 'password lama tidak bisa login lagi');
+  r = await call('../api/auth', { method: 'POST', body: { action: 'login', phone: '081900000009', password: 'jokobaru123' } });
+  ok(r.json.ok && r.json.token, 'login dengan password baru berhasil');
+  r = await call('../api/borrowers', { method: 'GET', headers: auth(tA) });
+  const bj = r.json.borrowers.find((b) => b.phone === '081900000009');
+  ok(bj && 'profile' in bj && bj.pencairan && bj.pencairan.metode === 'dana', 'daftar admin menyertakan profile + pencairan user');
 
   console.log(`\nSEMUA TES LOLOS (${n} asersi)`);
 })().catch((e) => {
