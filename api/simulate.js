@@ -4,7 +4,7 @@
 //   pelunasan sekali lunas.
 const { getJSON } = require('../lib/store');
 const { requireAuth, readBody, send } = require('../lib/auth');
-const { calcLoan, amountWithMethod, daysToNextFirst, nextFirstDate, localDateStr } = require('../lib/calc');
+const { calcLoan, amountWithMethod, daysToNextFirst, nextFirstDate, localDateStr, MIN_POKOK } = require('../lib/calc');
 const { effectiveLimit, limitBonus } = require('../lib/profile');
 
 module.exports = requireAuth(async (req, res) => {
@@ -14,6 +14,9 @@ module.exports = requireAuth(async (req, res) => {
     const pk = Number(pokok);
     if (!Number.isInteger(pk) || pk <= 0) {
       return send(res, 400, { ok: false, error: 'Pokok tidak valid.' });
+    }
+    if (pk < MIN_POKOK) {
+      return send(res, 400, { ok: false, error: 'Minimal pengajuan Rp10.000.' });
     }
     const days = daysToNextFirst(new Date());
     const dueDate = localDateStr(nextFirstDate(new Date()));

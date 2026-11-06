@@ -5,7 +5,7 @@
 //     v2.5: tenor & metode ditentukan sistem (tutup buku tanggal 1).
 const { getJSON, setJSON, nextId } = require('../lib/store');
 const { requireAuth, readBody, send } = require('../lib/auth');
-const { calcLateFee, todayStr, cooldownRemaining, daysToNextFirst, totalDueOf } = require('../lib/calc');
+const { calcLateFee, todayStr, cooldownRemaining, daysToNextFirst, totalDueOf, MIN_POKOK } = require('../lib/calc');
 const { effectiveLimit } = require('../lib/profile');
 
 async function idxPush(key, val) {
@@ -61,6 +61,7 @@ module.exports = requireAuth(async (req, res) => {
       const { pokok } = await readBody(req);
       const pk = Number(pokok);
       if (!Number.isInteger(pk) || pk <= 0) return send(res, 400, { ok: false, error: 'Pokok tidak valid.' });
+      if (pk < MIN_POKOK) return send(res, 400, { ok: false, error: 'Minimal pengajuan Rp10.000.' });
       const user = await getJSON('user:' + sess.phone);
       if (!user || user.status !== 'active') return send(res, 403, { ok: false, error: 'Akun tidak aktif.' });
       if (pk > effectiveLimit(user)) {

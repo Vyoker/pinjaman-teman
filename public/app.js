@@ -1,7 +1,7 @@
 'use strict';
 /* Pinjaman Teman — SPA frontend (Bootstrap 5 + animasi) */
 
-const APP_VERSION = '2.8.2';
+const APP_VERSION = '2.9.0';
 const $ = (s) => document.querySelector(s);
 /** Pasang handler ke semua elemen yang cocok (pengganti pola querySelectorAll berulang). */
 const bindAll = (sel, ev, fn) => document.querySelectorAll(sel).forEach((el) => el.addEventListener(ev, fn));
@@ -352,34 +352,34 @@ async function vAjukan() {
   const cd = cooldownMs(loans); // v2.3: jeda 3 hari setelah pelunasan
   if (cd > 0) { main.innerHTML = cooldownNote(cd); return; }
   const eff = Math.floor(((me.effectiveLimit ?? me.limit) || 0) / 1000) * 1000;
-  const defPokok = eff >= 500000 ? 500000 : Math.max(eff, 1000);
+  const defPokok = eff >= 500000 ? 500000 : eff;
   main.innerHTML = `
     <div${stagger(0, 'card')}>
       <h3><i class="bi bi-plus-circle-fill me-2" style="color:var(--gold)"></i>Ajukan Pinjaman</h3>
       <div class="kv"><span class="k">Limit kamu</span><span class="v">${fmtRp(me.effectiveLimit ?? me.limit)}${((me.bonusLimit || 0) > 0 || (me.rankBonus || 0) > 0) ? ` <span class="muted" style="font-size:12px">(bonus data ${fmtRp(me.bonusLimit || 0)} + bonus rank ${fmtRp(me.rankBonus || 0)})</span>` : ''}</span></div>
       ${!me.pencairan ? '<p class="note warn"><i class="bi bi-exclamation-triangle-fill me-1"></i>Kamu belum mengisi data pencairan. Isi dulu di menu Akun agar pinjaman bisa dicairkan.</p>' : ''}
-      ${eff < 1000
+      ${eff < 10000
         ? '<p class="note warn"><i class="bi bi-exclamation-triangle-fill me-1"></i>Limit pinjamanmu belum diatur. Hubungi admin untuk mengaktifkan pengajuan.</p>'
-        : `<label class="form-label">Jumlah pokok: <strong id="a-pokok-lbl" style="color:var(--gold)">${fmtRp(defPokok)}</strong></label>
-      <input id="a-pokok" class="form-range" type="range" min="1000" max="${eff}" step="1000" value="${defPokok}">
-      <div class="d-flex justify-content-between mb-1"><span class="muted" style="font-size:12px">Rp 1.000</span><span class="muted" style="font-size:12px">maks ${fmtRp(eff)}</span></div>`}
+        : `<label class="form-label" for="a-pokok">Jumlah pokok</label>
+      <div class="amount-wrap"><span class="amount-prefix">Rp</span><input id="a-pokok" class="form-control amount-input" type="text" inputmode="numeric" autocomplete="off" value="${defPokok.toLocaleString('id-ID')}"></div>
+      <div class="d-flex justify-content-between mb-1"><span class="muted" style="font-size:12px">Minimal Rp 10.000</span><span class="muted" style="font-size:12px">maks ${fmtRp(eff)}</span></div>
+      <p class="note warn hidden" id="a-err"></p>`}
       <div class="kv mt-2"><span class="k">Jatuh tempo (tutup buku)</span><span class="v" style="color:var(--gold)">Tanggal 1 bulan depan</span></div>
       <p class="muted mb-0" style="font-size:12px">Pelunasan sekali lunas. Bunga harian dihitung sampai tanggal 1. Tanggal final ditetapkan saat persetujuan.</p>
       <div id="a-sim"></div>
-      <button class="btn btn-primary w-100 mt-3" id="a-submit" ${eff < 1000 ? 'disabled' : ''}><i class="bi bi-send-fill me-2"></i>Kirim Pengajuan</button>
+      <button class="btn btn-primary w-100 mt-3" id="a-submit" ${eff < 10000 ? 'disabled' : ''}><i class="bi bi-send-fill me-2"></i>Kirim Pengajuan</button>
     </div>`;
 
-  const pRange = $('#a-pokok');
-  const paint = (el, min, max) => {
-    const p = max > min ? ((el.value - min) / (max - min)) * 100 : 0;
-    el.style.setProperty('--fill', p + '%');
-  };
+  const pInput = $('#a-pokok');
+  const parsePokok = () => Number((pInput.value || '').replace(/\D/g, '')) || 0;
 
   const renderSim = async () => {
-    if (!pRange) return;
-    const pokok = Number(pRange.value);
-    $('#a-pokok-lbl').textContent = fmtRp(pokok);
-    paint(pRange, 1000, eff);
+    if (!pInput) return;
+    const pokok = parsePokok();
+    const err = $('#a-err');
+    if (pokok > 0 && pokok < 10000) { err.textContent = 'Minimal pengajuan Rp10.000.'; err.classList.remove('hidden'); $('#a-sim').innerHTML = ''; return; }
+    if (pokok > eff) { err.textContent = `Pokok melebihi limit kamu (maks ${fmtRp(eff)}).`; err.classList.remove('hidden'); $('#a-sim').innerHTML = ''; return; }
+    err.classList.add('hidden');
     if (!pokok || pokok <= 0) { $('#a-sim').innerHTML = ''; return; }
     try {
       const s = await api('/api/simulate', 'POST', { pokok });
@@ -399,13 +399,23 @@ async function vAjukan() {
     } catch (e) { $('#a-sim').innerHTML = `<p class="note warn">${esc(e.message)}</p>`; }
   };
   const deb = () => { clearTimeout(simTimer); simTimer = setTimeout(renderSim, 450); };
-  if (pRange) pRange.addEventListener('input', deb);
-  if (pRange) renderSim();
+  if (pInput) pInput.addEventListener('input', () => {
+    const digits = (pInput.value || '').replace(/\D/g, '').slice(0, 9);
+    pInput.value = digits ? Number(digits).toLocaleString('id-ID') : '';
+    deb();
+  });
+  if (pInput) pInput.addEventListener('blur', () => {
+    const pokok = parsePokok();
+    if (pokok > eff) pInput.value = eff.toLocaleString('id-ID');
+    else if (pokok > 0 && pokok < 10000) pInput.value = (10000).toLocaleString('id-ID');
+    renderSim();
+  });
+  if (pInput) renderSim();
 
   $('#a-submit').addEventListener('click', async () => {
     try {
       await api('/api/loans', 'POST', {
-        pokok: Number($('#a-pokok').value),
+        pokok: parsePokok(),
       });
       toast('Pengajuan terkirim. Menunggu persetujuan admin.');
       go('bDash');

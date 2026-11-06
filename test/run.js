@@ -477,6 +477,13 @@ function ok(cond, label) {
   ok(r.json.rankBonus === 10000, 'v2.6: 8 lunas -> Bronze, rankBonus 10000');
   ok(r.json.effectiveLimit === 510000, 'effectiveLimit = 500rb + 10rb bonus rank');
   ok(r.json.rank && r.json.rank.name === 'Bronze', 'rank Bronze terdeteksi (rombak retroaktif)');
+  // v2.9: minimal pengajuan Rp10.000 (frontend input + backend)
+  r = await call('../api/simulate', { method: 'POST', headers: auth(tF), body: { pokok: 5000 } });
+  ok(r.status === 400 && /10\.000/.test(r.json.error), 'simulate: pokok 5000 ditolak (min 10rb)');
+  r = await call('../api/simulate', { method: 'POST', headers: auth(tF), body: { pokok: 10000 } });
+  ok(r.json.ok, 'simulate: pokok 10000 diterima (batas min)');
+  r = await call('../api/loans', { method: 'POST', headers: auth(tF), body: { pokok: 5000 } });
+  ok(r.status === 400 && /10\.000/.test(r.json.error), 'pengajuan 5000 ditolak (min 10rb)');
   // apply: pokok di atas limit+bonus rank ditolak
   r = await call('../api/loans', { method: 'POST', headers: auth(tF), body: { pokok: 511000 } });
   ok(r.status === 400 && /limit/i.test(r.json.error), 'pokok 511rb > 510rb ditolak');
