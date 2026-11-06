@@ -82,7 +82,7 @@ module.exports = requireAuth(async (req, res) => {
         id, borrowerPhone: sess.phone, borrowerName: user.name,
         pokok: pk, tenorProposal: daysToNextFirst(new Date()), tenorHari: null, metode: 'lunas',
         tutupBuku: true, // v2.5: jatuh tempo tanggal 1 bulan depan
-        nCicilan: null, bunga: null, biayaLayanan: null, total: null,
+        nCicilan: null, bunga: null, biayaLayanan: null, biayaPencairan: null, total: null,
         schedule: [], status: 'diajukan',
         createdAt: new Date().toISOString(), approvedAt: null, disbursedAt: null,
       };

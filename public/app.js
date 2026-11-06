@@ -1,7 +1,7 @@
 'use strict';
 /* Pinjaman Teman — SPA frontend (Bootstrap 5 + animasi) */
 
-const APP_VERSION = '2.6.0';
+const APP_VERSION = '2.7.0';
 const $ = (s) => document.querySelector(s);
 /** Pasang handler ke semua elemen yang cocok (pengganti pola querySelectorAll berulang). */
 const bindAll = (sel, ev, fn) => document.querySelectorAll(sel).forEach((el) => el.addEventListener(ev, fn));
@@ -388,6 +388,7 @@ async function vAjukan() {
         <h4>Simulasi</h4>
         <div class="kv"><span class="k">Bunga (0,2%/hari × ${s.days} hari)</span><span class="v">${fmtRp(s.bunga)}</span></div>
         <div class="kv"><span class="k">Biaya layanan</span><span class="v">${fmtRp(s.biayaLayanan)}</span></div>
+        <div class="kv"><span class="k">Biaya pencairan</span><span class="v">${fmtRp(s.biayaPencairan)}</span></div>
         <div class="kv"><span class="k">Total tagihan</span><span class="v big">${fmtRp(s.total)}</span></div>
         <div class="kv"><span class="k">Jatuh tempo</span><span class="v">${fmtDate(s.dueDate)}</span></div>
         <h4>Total bayar per metode</h4>
@@ -629,6 +630,7 @@ async function vPengajuan() {
       <div class="kv"><span class="k">Tenor</span><span class="v">${l.tenorHari} hari &middot; ${l.metode === 'cicilan' ? 'Cicilan ' + l.nCicilan + 'x' : 'Sekaligus'}</span></div>
       <div class="kv"><span class="k">Bunga (0,2%/hari)</span><span class="v">${fmtRp(l.bunga)}</span></div>
       <div class="kv"><span class="k">Biaya layanan</span><span class="v">${fmtRp(l.biayaLayanan)}</span></div>
+      ${l.biayaPencairan ? `<div class="kv"><span class="k">Biaya pencairan</span><span class="v">${fmtRp(l.biayaPencairan)}</span></div>` : ''}
       <div class="kv"><span class="k">Total tagihan</span><span class="v" style="color:var(--gold)">${fmtRp(l.total)}</span></div>
       <div class="kv"><span class="k">Sudah dibayar</span><span class="v">${fmtRp(paidSum)}</span></div>
       <h4 class="mt-3">Rincian tagihan</h4>
@@ -648,6 +650,7 @@ async function vPengajuan() {
       el.innerHTML = `
         <div class="kv"><span class="k">Bunga (0,2%/hari × ${s.days} hari)</span><span class="v">${fmtRp(s.bunga)}</span></div>
         <div class="kv"><span class="k">Biaya layanan</span><span class="v">${fmtRp(s.biayaLayanan)}</span></div>
+        <div class="kv"><span class="k">Biaya pencairan</span><span class="v">${fmtRp(s.biayaPencairan)}</span></div>
         <div class="kv"><span class="k">Total tagihan</span><span class="v" style="color:var(--gold)">${fmtRp(s.total)}</span></div>
         <p class="muted mb-0" style="font-size:12px">Jatuh tempo final ditetapkan saat persetujuan (tanggal 1 bulan depan dari tanggal cair).</p>`;
     } catch (e) {

@@ -58,24 +58,24 @@ function ok(cond, label) {
   const PROOF = 'data:image/jpeg;base64,' + 'A'.repeat(2000); // bukti dummy untuk tes v1.6+
   console.log('== Tes kalkulasi ==');
   const a = calc.calcLoan(500000, 30, 'lunas');
-  ok(a.total === 532000, 'contoh user: 500rb/30hr/lunas = 532.000 (dapat ' + a.total + ')');
-  ok(a.bunga === 30000, 'bunga 30.000');
+  ok(a.total === 534500, 'contoh user: 500rb/30hr/lunas = 534.500 (dapat ' + a.total + ')');
+  ok(a.bunga === 30000 && a.biayaLayanan === 2000 && a.biayaPencairan === 2500, 'bunga 30.000 + biaya layanan 2.000 + biaya pencairan 2.500');
   ok(a.nCicilan === 1, 'lunas = 1 tagihan');
 
   const b = calc.calcLoan(500000, 30, 'cicilan');
   ok(b.nCicilan === 4, '30 hari -> 4 cicilan');
-  ok(b.schedule.reduce((s, x) => s + x.amount, 0) === 532000, 'cicilan genap 4x133.000 = 532.000');
+  ok(b.schedule.reduce((s, x) => s + x.amount, 0) === 534500, 'cicilan genap 4x133.625 = 534.500');
   ok(JSON.stringify(b.schedule.map((x) => x.dueInDays)) === '[8,15,23,30]', 'jatuh tempo tiap ~7-8 hari');
 
   const c = calc.calcLoan(500000, 15, 'cicilan');
   ok(c.nCicilan === 2, '15 hari -> 2 cicilan');
-  ok(c.total === 517000, 'total 15 hari = 517.000');
+  ok(c.total === 519500, 'total 15 hari = 519.500');
 
   const d = calc.calcLoan(1000001, 30, 'cicilan');
   ok(d.schedule.reduce((s, x) => s + x.amount, 0) === d.total, 'sisa pembulatan masuk angsuran terakhir');
 
-  ok(calc.amountWithMethod(532000, 'qris') === 537320, 'QRIS +1% MDR = 537.320');
-  ok(calc.amountWithMethod(532000, 'dana') === 532000, 'Dana tanpa tambahan');
+  ok(calc.amountWithMethod(534500, 'qris') === 539845, 'QRIS +1% MDR = 539.845');
+  ok(calc.amountWithMethod(534500, 'dana') === 534500, 'Dana tanpa tambahan');
   assert.throws(() => calc.calcLoan(500000, 0, 'lunas'), /Tenor/, 'tenor 0 ditolak');
   assert.throws(() => calc.calcLoan(500000, 61, 'lunas'), /Tenor/, 'tenor >60 ditolak');
   console.log('  ok - validasi tenor');
@@ -725,6 +725,23 @@ function ok(cond, label) {
   // simulate: pokok saja, konsisten dengan approve
   r = await call('../api/simulate', { method: 'POST', headers: auth(tJ), body: { pokok: 200000 } });
   ok(r.json.ok && r.json.days === calc.daysToNextFirst(new Date()) && r.json.dueDate === calc.localDateStr(calc.nextFirstDate(new Date())), 'simulate tutup buku konsisten');
+
+  // ============ v2.7: biaya pencairan Rp2.500 ============
+  r = await call('../api/simulate', { method: 'POST', headers: auth(tJ), body: { pokok: 200000 } });
+  ok(r.json.biayaPencairan === 2500, 'simulate: biaya pencairan 2500');
+  ok(r.json.total === 200000 + r.json.bunga + 2000 + 2500, 'simulate: total termasuk biaya pencairan');
+  r = await call('../api/auth', { method: 'POST', body: { action: 'register', name: 'Dewi', phone: '081900000011', password: 'dewi1234' } });
+  ok(r.json.ok, 'registrasi Dewi');
+  r = await call('../api/borrowers', { method: 'POST', headers: auth(tA), body: { phone: '081900000011', approve: true, limit: 500000 } });
+  ok(r.json.ok, 'admin setujui Dewi');
+  const tDewi = (await call('../api/auth', { method: 'POST', body: { action: 'login', phone: '081900000011', password: 'dewi1234' } })).json.token;
+  r = await call('../api/profile', { method: 'POST', headers: auth(tDewi), body: { action: 'pencairan', metode: 'dana', nomor: '081900000011', atasNama: 'Dewi' } });
+  assert.ok(r.json.ok, 'Dewi isi data pencairan');
+  r = await call('../api/loans', { method: 'POST', headers: auth(tDewi), body: { pokok: 200000 } });
+  const loanFee = r.json.loan.id;
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId: loanFee, approve: true } });
+  ok(r.json.loan.biayaPencairan === 2500, 'approve: biaya pencairan tersimpan di pinjaman');
+  ok(r.json.loan.total === r.json.loan.pokok + r.json.loan.bunga + r.json.loan.biayaLayanan + 2500, 'approve: total termasuk biaya pencairan');
 
   // ============ v2.6: lupa password + detail user admin ============
   r = await call('../api/auth', { method: 'POST', body: { action: 'forgot-request', phone: '081900000009' } });

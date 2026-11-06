@@ -45,6 +45,7 @@ async function decide(res, loan, body, actor) {
   loan.nCicilan = sim.nCicilan;
   loan.bunga = sim.bunga;
   loan.biayaLayanan = sim.biayaLayanan;
+  loan.biayaPencairan = sim.biayaPencairan;
   loan.total = sim.total;
   loan.schedule = sim.schedule.map((s) => ({
     ...s,
