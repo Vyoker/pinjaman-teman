@@ -1,7 +1,7 @@
 'use strict';
 /* Pinjaman Teman — SPA frontend (Bootstrap 5 + animasi) */
 
-const APP_VERSION = '2.7.0';
+const APP_VERSION = '2.8.0';
 const $ = (s) => document.querySelector(s);
 /** Pasang handler ke semua elemen yang cocok (pengganti pola querySelectorAll berulang). */
 const bindAll = (sel, ev, fn) => document.querySelectorAll(sel).forEach((el) => el.addEventListener(ev, fn));
@@ -613,13 +613,17 @@ async function vPengajuan() {
     const paid = l.schedule.filter((s) => s.status === 'lunas').length;
     const paidSum = l.schedule.filter((s) => s.status === 'lunas').reduce((a, s) => a + s.amount + (s.lateFeePaid || 0), 0);
     const canCancel = l.schedule.every((s) => s.status === 'belum');
-    const schedRows = l.schedule.map((s, idx) => `
+    const schedRows = l.schedule.map((s, idx) => {
+      const hasPartial = s.status === 'belum' && ((s.sisaPokok !== undefined && s.sisaPokok !== null && s.sisaPokok < s.amount) || (s.partials && s.partials.length));
+      const partialInfo = hasPartial ? `<div class="muted" style="font-size:12px">Sisa pokok ${fmtRp(s.sisaPokok ?? s.amount)}${s.lateFee ? ` &middot; denda berjalan ${fmtRp(s.lateFee)}` : ''}${(s.partials || []).map((pp) => `<br>Bayar sebagian ${fmtRp(pp.amount)} (${fmtDate(pp.date)})`).join('')}</div>` : '';
+      return `
       <div class="kv"><span class="k">#${s.n} &middot; jatuh tempo ${fmtDate(s.dueDate)}</span>
-      <span class="v">${fmtRp(s.amount)}${s.status === 'belum'
+      <span class="v">${fmtRp(s.totalDue ?? s.amount)}${s.status === 'belum'
         ? ` <button class="btn btn-success btn-sm ms-1" data-mp="${l.id}:${idx}"><i class="bi bi-check2-circle me-1"></i>Tandai Lunas</button>`
         : (s.status === 'lunas' && s.payMethod === 'tunai'
           ? ` <span class="muted" style="font-size:12px">TUNAI</span>`
-          : '')}</span></div>`).join('');
+          : '')}</span></div>${partialInfo}`;
+    }).join('');
     return `
     <div${stagger(i, 'card')}>
       <div class="d-flex justify-content-between align-items-center mb-2">
@@ -680,7 +684,7 @@ async function vPengajuan() {
     const [loanId, idx] = b.dataset.mp.split(':');
     const loan = running.find((x) => x.id === loanId);
     const item = loan && loan.schedule[Number(idx)];
-    if (item) showManualPay(loanId, Number(idx), item.amount, item.dueDate);
+    if (item) showManualPay(loanId, Number(idx), item);
   }));
 }
 
@@ -940,8 +944,11 @@ function showProof(src) {
   bootstrap.Modal.getOrCreateInstance(m).show();
 }
 
-/** Modal tandai lunas manual / tunai ke admin (v1.9). */
-function showManualPay(loanId, schedIdx, amount, dueDate) {
+/** Modal tandai lunas manual / tunai ke admin (v1.9; v2.8: + bayar sebagian). */
+function showManualPay(loanId, schedIdx, item) {
+  const amount = item.totalDue ?? item.amount;
+  const dueDate = item.dueDate;
+  const sisaPokok = item.sisaPokok ?? item.amount;
   let m = $('#mpModal');
   if (!m) {
     document.body.insertAdjacentHTML('beforeend', `
@@ -954,14 +961,17 @@ function showManualPay(loanId, schedIdx, amount, dueDate) {
             </div>
             <div class="modal-body">
               <p class="muted" id="mpInfo"></p>
-              <label class="form-label">Tanggal bayar</label>
+              <label class="form-label">Jumlah bayar (Rp)</label>
+              <input type="number" id="mpAmount" class="form-control" min="1000" step="1000" placeholder="Kosongkan bila lunas penuh">
+              <label class="form-label mt-2">Tanggal bayar</label>
               <input type="date" id="mpDate" class="form-control">
               <label class="form-label mt-2">Catatan (opsional)</label>
-              <input type="text" id="mpNote" class="form-control" maxlength="200" placeholder="cth: cicilan minggu pertama, tunai">
-              <p class="note mt-2 mb-0"><i class="bi bi-info-circle-fill me-1"></i>Denda 1%/hari dihitung sampai tanggal bayar. Peminjam otomatis dapat notifikasi.</p>
+              <input type="text" id="mpNote" class="form-control" maxlength="200" placeholder="cth: bayar sebagian dulu, tunai">
+              <p class="note mt-2 mb-0"><i class="bi bi-info-circle-fill me-1"></i>Denda 1%/hari dihitung sampai tanggal bayar. Bayar sebagian: denda dibayar dulu, baru pokok. Peminjam otomatis dapat notifikasi.</p>
             </div>
             <div class="modal-footer" style="border-color:#ffffff18">
               <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+              <button type="button" class="btn btn-outline-light" id="mpPartial"><i class="bi bi-cash-coin me-1"></i>Bayar Sebagian</button>
               <button type="button" class="btn btn-success" id="mpConfirm"><i class="bi bi-check2-circle me-1"></i>Tandai Lunas</button>
             </div>
           </div>
@@ -969,7 +979,7 @@ function showManualPay(loanId, schedIdx, amount, dueDate) {
       </div>`);
     m = $('#mpModal');
   }
-  $('#mpInfo').innerHTML = `Tagihan <strong>${fmtRp(amount)}</strong> &middot; jatuh tempo ${fmtDate(dueDate)}`;
+  $('#mpInfo').innerHTML = `Total saat ini <strong>${fmtRp(amount)}</strong> &middot; jatuh tempo ${fmtDate(dueDate)}${sisaPokok < item.amount ? `<br>Sisa pokok ${fmtRp(sisaPokok)}${item.lateFee ? ` &middot; denda berjalan ${fmtRp(item.lateFee)}` : ''}` : ''}`;
   const d = new Date();
   $('#mpDate').value = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   $('#mpDate').max = $('#mpDate').value;
@@ -981,6 +991,20 @@ function showManualPay(loanId, schedIdx, amount, dueDate) {
         paidDate: $('#mpDate').value, note: $('#mpNote').value,
       });
       toast('Pembayaran tunai tercatat lunas.');
+      bootstrap.Modal.getInstance(m).hide();
+      go('pengajuan');
+    } catch (e) { toast(e.message, true); }
+  };
+  $('#mpPartial').onclick = async () => {
+    const amt = Number($('#mpAmount').value);
+    if (!amt || amt <= 0) { toast('Isi jumlah bayar sebagian dulu.', true); return; }
+    if (amt >= amount) { toast('Jumlah sudah menutup tagihan — pakai Tandai Lunas.', true); return; }
+    try {
+      const j = await api('/api/loan-action', 'POST', {
+        action: 'partial-pay', loanId, schedIdx, amount: amt,
+        paidDate: $('#mpDate').value, note: $('#mpNote').value,
+      });
+      toast(j.settled ? 'Tagihan lunas.' : 'Bayar sebagian tercatat. Sisa tagihan berkurang.');
       bootstrap.Modal.getInstance(m).hide();
       go('pengajuan');
     } catch (e) { toast(e.message, true); }

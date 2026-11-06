@@ -7,7 +7,7 @@
 //   POST { action:'confirm', claimId, approve } (admin) -> konfirmasi/tolak klaim
 const { getJSON, setJSON, nextId, ensureStats } = require('../lib/store');
 const { requireAuth, readBody, send } = require('../lib/auth');
-const { amountWithMethod, calcLateFee, todayStr } = require('../lib/calc');
+const { amountWithMethod, calcLateFee, todayStr, totalDueOf, sisaPokokOf } = require('../lib/calc');
 
 async function idxPush(key, val) {
   const arr = (await getJSON(key)) || [];
@@ -66,16 +66,16 @@ module.exports = requireAuth(async (req, res) => {
       if (proof.length > 700000) {
         return send(res, 400, { ok: false, error: 'Foto bukti terlalu besar (maks ±700KB).' });
       }
-      // Denda dihitung sampai tanggal lapor bayar
+      // Denda dihitung sampai tanggal lapor bayar (v2.8: dari sisa pokok + tunggakan)
       const today = todayStr();
-      const { daysLate, lateFee } = calcLateFee(item.amount, item.dueDate, today);
-      const base = item.amount + lateFee;
+      const { daysLate, lateFee, totalDue } = totalDueOf(item, today);
+      const base = totalDue;
       const amount = amountWithMethod(base, payMethod);
       const id = await nextId('claim');
       const claim = {
         id, loanId: loan.id, schedIdx: Number(schedIdx),
         borrowerPhone: sess.phone, borrowerName: loan.borrowerName,
-        baseAmount: item.amount, lateFee, daysLate,
+        baseAmount: sisaPokokOf(item), lateFee, daysLate,
         amount, payMethod, proof, status: 'menunggu',
         createdAt: new Date().toISOString(), decidedAt: null,
       };
@@ -104,7 +104,9 @@ module.exports = requireAuth(async (req, res) => {
         item.paidAt = new Date().toISOString();
         item.payMethod = claim.payMethod;
         item.claimId = null;
-        item.lateFeePaid = claim.lateFee || 0;
+        item.lateFeePaid = (item.lateFeePaid || 0) + (claim.lateFee || 0);
+        item.sisaPokok = 0;
+        item.dendaBalance = 0;
         if (loan.schedule.every((s) => s.status === 'lunas')) { loan.status = 'lunas'; loan.lunasAt = new Date().toISOString(); }
         // Statistik peminjam (untuk sistem rank)
         const borrower = await getJSON('user:' + loan.borrowerPhone);

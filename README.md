@@ -10,13 +10,17 @@ Biaya layanan Rp 2.000 per pinjaman, biaya pencairan Rp 2.500 per pinjaman.
 Bayar via Dana, ShopeePay, atau QRIS (QRIS +1% MDR). Denda telat 1% per hari
 dari tagihan yang lewat jatuh tempo.
 
-## Yang baru di v2.7
+## Yang baru di v2.8
 
-- **Biaya pencairan Rp 2.500 per pinjaman** (pengganti biaya transfer saat
-  pencairan), ditambahkan ke total tagihan dan tampil sebagai baris sendiri
-  di simulasi, kartu pinjaman, dan preview admin. Hanya berlaku untuk
-  pinjaman baru yang disetujui setelah v2.7; pinjaman yang sedang berjalan
-  tidak berubah. Biaya ini bukan revenue — hanya pengganti biaya transfer.
+- **Bayar sebagian tunai via admin:** di menu Tandai Lunas, admin bisa
+  mencatat pembayaran sebagian (mis. Rp50.000 dari total Rp1.009.000).
+  Sisa tagihan terkunci sebagai basis denda baru — denda 1%/hari dihitung
+  dari sisa, bukan dari total awal. Pembayaran dialokasikan ke denda dulu,
+  baru ke pokok. Pinjaman tetap berjalan sampai sisa + denda = 0; bayar
+  sebagian tidak menambah hitungan rank (rank tetap dari pelunasan penuh).
+  Peminjam juga bisa melunasi sisa lewat klaim transfer biasa. Pinjaman
+  berjalan menyelesaikan dengan ketentuannya sendiri; pinjaman baru tetap
+  mengikuti aturan tutup buku + biaya pencairan.
 
 ## Catatan
 

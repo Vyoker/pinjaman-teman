@@ -5,7 +5,7 @@
 //        (syarat: belum ada pembayaran sama sekali)
 const { getJSON, setJSON, nextId, ensureStats } = require('../lib/store');
 const { requireAuth, readBody, send } = require('../lib/auth');
-const { calcLoan, MIN_TENOR, maxTenorFor, calcLateFee, todayStr, formatRp, daysToNextFirst, nextFirstDate, localDateStr } = require('../lib/calc');
+const { calcLoan, MIN_TENOR, maxTenorFor, calcLateFee, todayStr, formatRp, daysToNextFirst, nextFirstDate, localDateStr, sisaPokokOf, dendaBalanceOf, totalDueOf } = require('../lib/calc');
 const { isPencairanComplete } = require('../lib/profile');
 const { audit } = require('../lib/audit');
 
@@ -89,6 +89,73 @@ async function cancel(res, loan, actor) {
   return send(res, 200, { ok: true, loan });
 }
 
+/**
+ * v2.8: bayar sebagian tunai via admin. Uang dialokasikan ke denda dulu,
+ * sisanya baru mengurangi pokok. Sisa pokok terkunci sebagai basis denda
+ * berikutnya. Kalau jumlahnya menutup seluruh total, tagihan jadi lunas.
+ */
+async function partialPay(res, loan, body, actor) {
+  const schedIdx = Number(body.schedIdx);
+  const item = loan.schedule[schedIdx];
+  if (loan.status !== 'berjalan') return send(res, 400, { ok: false, error: 'Pinjaman tidak aktif.' });
+  if (!item) return send(res, 400, { ok: false, error: 'Tagihan tidak valid.' });
+  if (item.status !== 'belum') return send(res, 400, { ok: false, error: 'Tagihan ini sudah diproses.' });
+  const amount = Number(body.amount);
+  if (!Number.isInteger(amount) || amount <= 0) {
+    return send(res, 400, { ok: false, error: 'Jumlah bayar harus bilangan bulat positif.' });
+  }
+  const today = todayStr();
+  let paidDate = String(body.paidDate || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(paidDate)) paidDate = today;
+  if (paidDate > today) return send(res, 400, { ok: false, error: 'Tanggal bayar tidak boleh melebihi hari ini.' });
+  const { daysLate, lateFee, totalDue } = totalDueOf(item, paidDate);
+  if (amount > totalDue) {
+    return send(res, 400, { ok: false, error: `Jumlah melebihi total tagihan saat ini (${formatRp(totalDue)}).` });
+  }
+  const note = String(body.note || '').trim().slice(0, 200);
+  // Alokasi: denda dulu, baru pokok
+  const dendaPaid = Math.min(amount, lateFee);
+  const pokokPaid = amount - dendaPaid;
+  item.dendaBalance = lateFee - dendaPaid;
+  item.sisaPokok = sisaPokokOf(item) - pokokPaid;
+  item.lastSettleDate = paidDate;
+  item.lateFeePaid = (item.lateFeePaid || 0) + dendaPaid;
+  item.partials = item.partials || [];
+  item.partials.push({ date: paidDate, amount, dendaPaid, pokokPaid, note: note || '', createdAt: new Date().toISOString() });
+  const settled = item.sisaPokok <= 0 && item.dendaBalance <= 0;
+  if (settled) {
+    item.status = 'lunas';
+    item.paidAt = new Date(paidDate + 'T12:00:00').toISOString();
+    item.payMethod = 'tunai';
+    item.claimId = null;
+    if (loan.schedule.every((s) => s.status === 'lunas')) { loan.status = 'lunas'; loan.lunasAt = new Date().toISOString(); }
+  }
+  // Statistik: tiap pembayaran (sebagian maupun lunas) dihitung 1x;
+  // rank hanya naik saat pinjaman lunas penuh
+  const borrower = await getJSON('user:' + loan.borrowerPhone);
+  if (borrower) {
+    const stats = ensureStats(borrower);
+    stats.payments += 1;
+    if (loan.status === 'lunas') stats.loansLunas += 1;
+    await setJSON('user:' + loan.borrowerPhone, borrower);
+  }
+  await setJSON('loan:' + loan.id, loan);
+  const judul = loan.metode === 'cicilan' ? `Cicilan ${item.n}/${loan.nCicilan}` : 'Pelunasan';
+  const message = settled
+    ? `Admin mencatat ${judul} sebagai LUNAS (tunai ke admin, ${paidDate}) — bayar sebagian terakhir ${formatRp(amount)}. Terima kasih.`
+    : `Admin mencatat pembayaran tunai sebagian ${formatRp(amount)} untuk ${judul} (${paidDate})${dendaPaid > 0 ? ` — denda dibayar ${formatRp(dendaPaid)}` : ''}. Sisa tagihan ${formatRp(item.sisaPokok)}${item.dendaBalance > 0 ? ` + tunggakan denda ${formatRp(item.dendaBalance)}` : ''}.`;
+  const id = await nextId('notif');
+  await setJSON('notif:' + id, {
+    id, to: loan.borrowerPhone, targetName: loan.borrowerName,
+    message, createdAt: new Date().toISOString(), kind: 'partial-pay',
+  });
+  const ids = (await getJSON('idx:notifs')) || [];
+  ids.push(id);
+  await setJSON('idx:notifs', ids);
+  await audit(settled ? 'tandai-lunas-tunai' : 'bayar-sebagian-tunai', actor, `${loan.id} (${loan.borrowerName}): tagihan #${item.n} bayar ${formatRp(amount)} (denda ${formatRp(dendaPaid)}, pokok ${formatRp(pokokPaid)}), sisa ${formatRp(item.sisaPokok)}${daysLate > 0 ? `, telat ${daysLate} hari` : ''}, tgl bayar ${paidDate}.`);
+  return send(res, 200, { ok: true, loan, settled });
+}
+
 /* ============ PEMBAYARAN MANUAL (TUNAI KE ADMIN) — v1.9 ============
  * Admin menandai satu tagihan sebagai lunas karena dibayar tunai langsung,
  * mis. cicilan minggu pertama. Denda dihitung sampai tanggal bayar yang
@@ -104,13 +171,16 @@ async function manualPay(res, loan, body, actor) {
   let paidDate = String(body.paidDate || '').slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(paidDate)) paidDate = today;
   if (paidDate > today) return send(res, 400, { ok: false, error: 'Tanggal bayar tidak boleh melebihi hari ini.' });
-  const { daysLate, lateFee } = calcLateFee(item.amount, item.dueDate, paidDate);
+  const { daysLate, lateFee, totalDue } = totalDueOf(item, paidDate);
   const note = String(body.note || '').trim().slice(0, 200);
   item.status = 'lunas';
   item.paidAt = new Date(paidDate + 'T12:00:00').toISOString();
   item.payMethod = 'tunai';
   item.claimId = null;
-  item.lateFeePaid = lateFee;
+  item.lateFeePaid = (item.lateFeePaid || 0) + lateFee;
+  item.sisaPokok = 0;
+  item.dendaBalance = 0;
+  item.lastSettleDate = paidDate;
   item.manualNote = note || 'Tunai ke admin';
   if (loan.schedule.every((s) => s.status === 'lunas')) { loan.status = 'lunas'; loan.lunasAt = new Date().toISOString(); }
   // Statistik peminjam (untuk sistem rank) — sama seperti konfirmasi klaim
@@ -124,7 +194,7 @@ async function manualPay(res, loan, body, actor) {
   await setJSON('loan:' + loan.id, loan);
   // Notifikasi ke peminjam
   const judul = loan.metode === 'cicilan' ? `Cicilan ${item.n}/${loan.nCicilan}` : 'Pelunasan';
-  const message = `Admin mencatat ${judul} ${formatRp(item.amount)} sebagai LUNAS (tunai ke admin, ${paidDate})${daysLate > 0 ? ` — termasuk denda ${formatRp(lateFee)} (telat ${daysLate} hari)` : ''}. Terima kasih.`;
+  const message = `Admin mencatat ${judul} ${formatRp(totalDue)} sebagai LUNAS (tunai ke admin, ${paidDate})${daysLate > 0 ? ` — termasuk denda ${formatRp(lateFee)} (telat ${daysLate} hari)` : ''}. Terima kasih.`;
   const id = await nextId('notif');
   await setJSON('notif:' + id, {
     id, to: loan.borrowerPhone, targetName: loan.borrowerName,
@@ -133,7 +203,7 @@ async function manualPay(res, loan, body, actor) {
   const ids = (await getJSON('idx:notifs')) || [];
   ids.push(id);
   await setJSON('idx:notifs', ids);
-  await audit('tandai-lunas-tunai', actor, `${loan.id} (${loan.borrowerName}): tagihan #${item.n} ${formatRp(item.amount)}${daysLate > 0 ? ` + denda ${formatRp(lateFee)}` : ''}, tgl bayar ${paidDate}.`);
+  await audit('tandai-lunas-tunai', actor, `${loan.id} (${loan.borrowerName}): tagihan #${item.n} ${formatRp(totalDue)}${daysLate > 0 ? ` + denda ${formatRp(lateFee)}` : ''}, tgl bayar ${paidDate}.`);
   return send(res, 200, { ok: true, loan });
 }
 
@@ -147,6 +217,7 @@ module.exports = requireAuth(async (req, res) => {
     if (action === 'decide') return decide(res, loan, body, req.session.phone);
     if (action === 'cancel') return cancel(res, loan, req.session.phone);
     if (action === 'manual-pay') return manualPay(res, loan, body, req.session.phone);
+    if (action === 'partial-pay') return partialPay(res, loan, body, req.session.phone);
     return send(res, 400, { ok: false, error: 'Aksi tidak dikenal.' });
   } catch (e) {
     return send(res, 400, { ok: false, error: e.message });

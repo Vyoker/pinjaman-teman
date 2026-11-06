@@ -5,7 +5,7 @@
 //     v2.5: tenor & metode ditentukan sistem (tutup buku tanggal 1).
 const { getJSON, setJSON, nextId } = require('../lib/store');
 const { requireAuth, readBody, send } = require('../lib/auth');
-const { calcLateFee, todayStr, cooldownRemaining, daysToNextFirst } = require('../lib/calc');
+const { calcLateFee, todayStr, cooldownRemaining, daysToNextFirst, totalDueOf } = require('../lib/calc');
 const { effectiveLimit } = require('../lib/profile');
 
 async function idxPush(key, val) {
@@ -30,8 +30,8 @@ async function listLoans(filter) {
     if (l.status !== 'berjalan' || !Array.isArray(l.schedule)) continue;
     l.schedule = l.schedule.map((s) => {
       if (s.status === 'lunas') return { ...s, daysLate: 0, lateFee: 0, totalDue: s.amount };
-      const { daysLate, lateFee } = calcLateFee(s.amount, s.dueDate, today);
-      return { ...s, daysLate, lateFee, totalDue: s.amount + lateFee };
+      const { daysLate, lateFee, totalDue } = totalDueOf(s, today);
+      return { ...s, daysLate, lateFee, totalDue };
     });
   }
   return out;
