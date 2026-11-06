@@ -1,7 +1,7 @@
 'use strict';
 /* Pinjaman Teman — SPA frontend (Bootstrap 5 + animasi) */
 
-const APP_VERSION = '2.8.0';
+const APP_VERSION = '2.8.2';
 const $ = (s) => document.querySelector(s);
 /** Pasang handler ke semua elemen yang cocok (pengganti pola querySelectorAll berulang). */
 const bindAll = (sel, ev, fn) => document.querySelectorAll(sel).forEach((el) => el.addEventListener(ev, fn));
@@ -253,7 +253,7 @@ function loanCard(l, showSchedule, i) {
       <thead><tr><th>#</th><th>Jatuh tempo</th><th class="text-end">Jumlah</th><th>Status</th></tr></thead>
       <tbody>${l.schedule.map((s) => `<tr>
         <td>${s.n}/${l.nCicilan}</td><td>${fmtDate(s.dueDate)}</td>
-        <td class="text-end fw-bold">${fmtRp(s.amount)}${(s.lateFee || 0) > 0 ? `<div style="font-size:11px;color:var(--danger);font-weight:600">+denda ${fmtRp(s.lateFee)} (${s.daysLate}h)</div>` : ''}${s.lateFeePaid > 0 ? `<div style="font-size:11px" class="muted">denda lunas ${fmtRp(s.lateFeePaid)}</div>` : ''}</td><td>${badge(s.status)}</td>
+        <td class="text-end fw-bold">${fmtRp(s.status === 'lunas' ? s.amount : (s.sisaPokok ?? s.amount))}${(s.lateFee || 0) > 0 ? `<div style="font-size:11px;color:var(--danger);font-weight:600">+denda ${fmtRp(s.lateFee)} (${s.daysLate}h)</div>` : ''}${s.lateFeePaid > 0 ? `<div style="font-size:11px" class="muted">denda lunas ${fmtRp(s.lateFeePaid)}</div>` : ''}${(s.partials && s.partials.length) ? `<div style="font-size:11px" class="muted">bayar sebagian ${s.partials.length}x (admin)</div>` : ''}</td><td>${badge(s.status)}</td>
       </tr>`).join('')}</tbody>
     </table></div>` : '';
   return `
@@ -432,7 +432,7 @@ async function vBayar() {
         <div><strong>${title}</strong>
         <div class="muted">${fmtRp(l.pokok)} &middot; jatuh tempo ${fmtDate(s.dueDate)}</div></div>
         ${badge('menunggu')}</div>
-        <p class="muted mb-0 mt-2"><i class="bi bi-hourglass-split me-1"></i>Laporan bayar ${fmtRp(s.amount)} menunggu konfirmasi admin.</p></div>`;
+        <p class="muted mb-0 mt-2"><i class="bi bi-hourglass-split me-1"></i>Laporan bayar ${fmtRp(s.totalDue ?? s.amount)} menunggu konfirmasi admin.</p></div>`;
     }
     return `
     <div${stagger(idx, 'card')}>
@@ -472,7 +472,7 @@ async function vBayar() {
     $('#info-' + key).innerHTML = `<div class="pay-info">
       <div><i class="bi bi-arrow-right-circle me-1"></i>${dest[m]}</div>
       ${m === 'qris' ? '<img src="/qris.jpg" class="qris-img" alt="QRIS">' : ''}
-      ${(s.lateFee || 0) > 0 ? `<div class="muted">Tagihan ${fmtRp(s.amount)} + denda telat ${fmtRp(s.lateFee)} (${s.daysLate} hari × 1%)</div>` : ''}
+      ${(s.lateFee || 0) > 0 ? `<div class="muted">Tagihan ${fmtRp(s.sisaPokok ?? s.amount)} + denda telat ${fmtRp(s.lateFee)} (${s.daysLate} hari × 1%)</div>` : ''}
       <div class="total">Total bayar: ${fmtRp(total)}${m === 'qris' ? ' <span class="muted">(termasuk MDR 1%)</span>' : ''}</div>
       <div class="muted mt-1">Transfer dulu ke tujuan di atas, lalu tekan "Lapor Sudah Bayar".</div>
     </div>`;
@@ -619,7 +619,7 @@ async function vPengajuan() {
       return `
       <div class="kv"><span class="k">#${s.n} &middot; jatuh tempo ${fmtDate(s.dueDate)}</span>
       <span class="v">${fmtRp(s.totalDue ?? s.amount)}${s.status === 'belum'
-        ? ` <button class="btn btn-success btn-sm ms-1" data-mp="${l.id}:${idx}"><i class="bi bi-check2-circle me-1"></i>Tandai Lunas</button>`
+        ? ` <button class="btn btn-outline-light btn-sm ms-1" data-mp="${l.id}:${idx}"><i class="bi bi-cash-coin me-1"></i>Bayar Sebagian</button> <button class="btn btn-success btn-sm ms-1" data-mp="${l.id}:${idx}"><i class="bi bi-check2-circle me-1"></i>Tandai Lunas</button>`
         : (s.status === 'lunas' && s.payMethod === 'tunai'
           ? ` <span class="muted" style="font-size:12px">TUNAI</span>`
           : '')}</span></div>${partialInfo}`;

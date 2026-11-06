@@ -10,7 +10,7 @@ Biaya layanan Rp 2.000 per pinjaman, biaya pencairan Rp 2.500 per pinjaman.
 Bayar via Dana, ShopeePay, atau QRIS (QRIS +1% MDR). Denda telat 1% per hari
 dari tagihan yang lewat jatuh tempo.
 
-## Yang baru di v2.8
+## Yang baru di v2.8.2
 
 - **Bayar sebagian tunai via admin:** di menu Tandai Lunas, admin bisa
   mencatat pembayaran sebagian (mis. Rp50.000 dari total Rp1.009.000).
@@ -18,9 +18,12 @@ dari tagihan yang lewat jatuh tempo.
   dari sisa, bukan dari total awal. Pembayaran dialokasikan ke denda dulu,
   baru ke pokok. Pinjaman tetap berjalan sampai sisa + denda = 0; bayar
   sebagian tidak menambah hitungan rank (rank tetap dari pelunasan penuh).
-  Peminjam juga bisa melunasi sisa lewat klaim transfer biasa. Pinjaman
-  berjalan menyelesaikan dengan ketentuannya sendiri; pinjaman baru tetap
-  mengikuti aturan tutup buku + biaya pencairan.
+  **Input bayar sebagian hanya ada di sisi admin** — peminjam tidak punya
+  kolom jumlah; mereka hanya melihat sisa tagihan dan melunasi sisanya lewat
+  klaim transfer biasa. Tombol "Bayar Sebagian" kini tampil langsung di
+  kartu pinjaman (di samping "Tandai Lunas"), bukan cuma di dalam modal.
+  Pinjaman berjalan menyelesaikan dengan ketentuannya sendiri; pinjaman baru
+  tetap mengikuti aturan tutup buku + biaya pencairan.
 
 ## Catatan
 
