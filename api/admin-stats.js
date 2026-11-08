@@ -2,7 +2,7 @@
 // GET /api/admin-stats (admin) -> ringkasan: outstanding, jatuh tempo minggu ini, telat, antrean
 const { getJSON } = require('../lib/store');
 const { requireAuth, send } = require('../lib/auth');
-const { calcLateFee, todayStr } = require('../lib/calc');
+const { todayStr, totalDueOf, sisaPokokOf } = require('../lib/calc');
 const { countPending } = require('../lib/profile');
 const { listAudit } = require('../lib/audit');
 
@@ -40,13 +40,15 @@ module.exports = requireAuth(async (req, res) => {
     activeLoans++;
     l.schedule.forEach((s, schedIdx) => {
       if (s.status === 'lunas') return;
-      const { daysLate, lateFee } = calcLateFee(s.amount, s.dueDate, today);
-      outstanding += s.amount + lateFee; // termasuk denda berjalan
+      // v2.9.1: outstanding & denda dihitung dari SISA pokok (setelah bayar
+      // sebagian), bukan total awal — berlaku untuk semua peminjam.
+      const { daysLate, lateFee, totalDue } = totalDueOf(s, today);
+      outstanding += totalDue; // termasuk denda berjalan
       const info = {
         loanId: l.id, borrowerName: l.borrowerName, borrowerPhone: l.borrowerPhone,
         n: s.n, nCicilan: l.nCicilan, schedIdx, remindedAt: s.remindedAt || null,
-        dueDate: s.dueDate, amount: s.amount,
-        status: s.status, daysLate, lateFee, totalDue: s.amount + lateFee,
+        dueDate: s.dueDate, amount: sisaPokokOf(s),
+        status: s.status, daysLate, lateFee, totalDue,
       };
       if (s.dueDate < today) late.push(info);
       else if (s.dueDate <= weekAhead) dueThisWeek.push(info);

@@ -9,7 +9,7 @@
 //   POST { action:'remind', loanId, schedIdx } -> pengingat jatuh tempo 1-klik (v1.6)
 const { getJSON, setJSON, nextId } = require('../lib/store');
 const { requireAuth, readBody, send, normPhone } = require('../lib/auth');
-const { calcLateFee, todayStr } = require('../lib/calc');
+const { todayStr, totalDueOf, sisaPokokOf } = require('../lib/calc');
 const { audit } = require('../lib/audit');
 
 function fmtRp(n) { return 'Rp ' + Number(n || 0).toLocaleString('id-ID'); }
@@ -66,11 +66,13 @@ async function broadcast(req, res) {
       const jam = Math.max(1, Math.floor(last / 3600e3));
       return send(res, 400, { ok: false, error: `Sudah diingatkan ${jam} jam lalu. Coba lagi besok.` });
     }
-    const { daysLate, lateFee } = calcLateFee(s.amount, s.dueDate, today);
-    const total = s.amount + lateFee;
+    // v2.9.1: nominal pengingat dari SISA pokok (setelah bayar sebagian),
+    // bukan total awal — berlaku untuk semua peminjam.
+    const { daysLate, lateFee, totalDue } = totalDueOf(s, today);
+    const total = totalDue;
     const judul = loan.metode === 'cicilan' ? `Cicilan ${s.n}/${loan.nCicilan}` : 'Pelunasan';
     const message = daysLate > 0
-      ? `Pengingat dari admin: ${judul} ${fmtRp(s.amount)} sudah TELAT ${daysLate} hari (jatuh tempo ${s.dueDate}). Total saat ini ${fmtRp(total)} termasuk denda ${fmtRp(lateFee)}. Segera bayar agar denda tidak bertambah.`
+      ? `Pengingat dari admin: ${judul} ${fmtRp(sisaPokokOf(s))} sudah TELAT ${daysLate} hari (jatuh tempo ${s.dueDate}). Total saat ini ${fmtRp(total)} termasuk denda ${fmtRp(lateFee)}. Segera bayar agar denda tidak bertambah.`
       : `Pengingat dari admin: ${judul} ${fmtRp(total)} jatuh tempo ${s.dueDate}${diffHari === 0 ? ' (hari ini)' : ` (${diffHari} hari lagi)`}. Segera lakukan pembayaran agar terhindar dari denda 1%/hari.`;
     s.remindedAt = new Date().toISOString();
     await setJSON('loan:' + loan.id, loan);

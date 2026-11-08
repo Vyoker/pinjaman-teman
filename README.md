@@ -10,22 +10,22 @@ Biaya layanan Rp 2.000 per pinjaman, biaya pencairan Rp 2.500 per pinjaman.
 Bayar via Dana, ShopeePay, atau QRIS (QRIS +1% MDR). Denda telat 1% per hari
 dari tagihan yang lewat jatuh tempo.
 
-## Yang baru di v2.9
+## Yang baru di v2.9.1
 
-- **Pengajuan pakai input, bukan slider:** nominal pokok kini diketik langsung
-  (format ribuan otomatis), minimal Rp10.000 dan tidak boleh melebihi total
-  limit — batas ini juga dijaga server, jadi pengajuan di bawah Rp10.000
-  ditolak. Kalau limit belum mencapai Rp10.000, pengajuan tetap terkunci
-  sampai admin mengatur limit.
-- **Tema neo-brutalism:** seluruh tampilan dirombak — border tebal, bayangan
-  keras, sudut lebih tegas, tombol terasa ditekan saat disentuh. Warna gradasi
-  emerald/emas yang sudah dipakai tetap dipertahankan.
-- **Background garis list transparan:** latar belakang kini memakai garis-garis
-  horizontal transparan (seperti garis buku catatan) di atas gradasi gelap.
-- Bayar sebagian tunai via admin tetap ada: tombol "Bayar Sebagian" di kartu
-  pinjaman, denda 1%/hari dihitung dari sisa, alokasi denda dulu baru pokok.
-  Pinjaman berjalan menyelesaikan dengan ketentuannya sendiri; pinjaman baru
-  tetap mengikuti aturan tutup buku + biaya pencairan.
+- **Perbaikan bug nominal dashboard (berlaku untuk semua peminjam):** setelah
+  bayar sebagian, dashboard admin masih menghitung dari total awal. Sekarang
+  semua nominal memakai sisa pokok: Total outstanding, daftar telat & jatuh
+  tempo minggu ini, dan pesan pengingat admin. Contoh Enjang (total
+  Rp1.009.000, sudah bayar sebagian Rp50.000): outstanding sekarang
+  Rp959.000 (bukan Rp1.009.000), dan kalau telat 4 hari totalnya Rp997.360
+  (denda Rp38.360 dari sisa, bukan Rp1.049.360).
+- Kartu pinjaman admin kini menampilkan "Sudah dibayar" yang menghitung
+  bayar sebagian juga (sebelumnya Rp0 padahal sudah ada bayar sebagian),
+  plus baris baru "Sisa tagihan" agar sisa yang harus ditagih langsung
+  kelihatan.
+- Pengajuan pakai input (bukan slider), minimal Rp10.000 dan tidak melebihi
+  total limit. Tema neo-brutalism dengan gradasi emerald/emas, background
+  garis list transparan.
 
 ## Catatan
 

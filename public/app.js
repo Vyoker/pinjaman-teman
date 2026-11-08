@@ -1,7 +1,7 @@
 'use strict';
 /* Pinjaman Teman — SPA frontend (Bootstrap 5 + animasi) */
 
-const APP_VERSION = '2.9.0';
+const APP_VERSION = '2.9.1';
 const $ = (s) => document.querySelector(s);
 /** Pasang handler ke semua elemen yang cocok (pengganti pola querySelectorAll berulang). */
 const bindAll = (sel, ev, fn) => document.querySelectorAll(sel).forEach((el) => el.addEventListener(ev, fn));
@@ -621,7 +621,12 @@ async function vPengajuan() {
     </div>`).join('') || `<div class="card anim-in"><p class="muted mb-0"><i class="bi bi-inbox me-2"></i>Tidak ada pengajuan menunggu.</p></div>`);
   const secBerjalan = '<div class="section-title">Pinjaman berjalan</div>' + (running.map((l, i) => {
     const paid = l.schedule.filter((s) => s.status === 'lunas').length;
-    const paidSum = l.schedule.filter((s) => s.status === 'lunas').reduce((a, s) => a + s.amount + (s.lateFeePaid || 0), 0);
+    // v2.9.1: "Sudah dibayar" menghitung bayar sebagian juga (bukan cuma tagihan lunas).
+    const paidSum = l.schedule.reduce((a, s) => a + (s.status === 'lunas'
+      ? s.amount + (s.lateFeePaid || 0)
+      : ((s.partials || []).reduce((x, pp) => x + (pp.amount || 0), 0) + (s.lateFeePaid || 0))), 0);
+    // v2.9.1: sisa tagihan = jumlah totalDue tagihan yang belum lunas.
+    const sisaSum = l.schedule.filter((s) => s.status !== 'lunas').reduce((a, s) => a + (s.totalDue ?? s.amount), 0);
     const canCancel = l.schedule.every((s) => s.status === 'belum');
     const schedRows = l.schedule.map((s, idx) => {
       const hasPartial = s.status === 'belum' && ((s.sisaPokok !== undefined && s.sisaPokok !== null && s.sisaPokok < s.amount) || (s.partials && s.partials.length));
@@ -647,6 +652,7 @@ async function vPengajuan() {
       ${l.biayaPencairan ? `<div class="kv"><span class="k">Biaya pencairan</span><span class="v">${fmtRp(l.biayaPencairan)}</span></div>` : ''}
       <div class="kv"><span class="k">Total tagihan</span><span class="v" style="color:var(--gold)">${fmtRp(l.total)}</span></div>
       <div class="kv"><span class="k">Sudah dibayar</span><span class="v">${fmtRp(paidSum)}</span></div>
+      <div class="kv"><span class="k">Sisa tagihan</span><span class="v" style="color:var(--gold)">${fmtRp(sisaSum)}</span></div>
       <h4 class="mt-3">Rincian tagihan</h4>
       ${schedRows}
       ${canCancel

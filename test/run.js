@@ -812,6 +812,12 @@ function ok(cond, label) {
   const itemEko = r.json.loans.find((l) => l.id === loanEko).schedule[0];
   const denda4 = Math.round(sisa1 * 0.01 * 4);
   ok(itemEko.daysLate === 4 && itemEko.lateFee === denda4 && itemEko.totalDue === sisa1 + denda4, 'denda berjalan dari sisa pokok (bukan total awal)');
+  // v2.9.1: admin-stats & pengingat pakai sisa pokok (bukan total awal)
+  r = await call('../api/admin-stats', { method: 'GET', headers: auth(tA) });
+  const lateEko = r.json.late.find((x) => x.loanId === loanEko);
+  ok(lateEko && lateEko.totalDue === sisa1 + denda4 && lateEko.lateFee === denda4 && lateEko.amount === sisa1, 'admin-stats: telat/outstanding pakai sisa pokok');
+  r = await call('../api/notifications', { method: 'POST', headers: auth(tA), body: { action: 'remind', loanId: loanEko, schedIdx: 0 } });
+  ok(r.json.ok && r.json.message.includes(calc.formatRp(sisa1 + denda4)) && !r.json.message.includes(calc.formatRp(expTotalEko)), 'pengingat: nominal sisa + denda, bukan total awal');
   // bayar sebagian 100rb saat telat: denda dulu, baru pokok
   r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'partial-pay', loanId: loanEko, schedIdx: 0, amount: 100000 } });
   const sisa2 = sisa1 - (100000 - denda4);
