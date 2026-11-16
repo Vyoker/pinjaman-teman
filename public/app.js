@@ -1,7 +1,7 @@
 'use strict';
 /* Pinjaman Teman — SPA frontend (Bootstrap 5 + animasi) */
 
-const APP_VERSION = '2.9.1';
+const APP_VERSION = '2.9.2';
 const $ = (s) => document.querySelector(s);
 /** Pasang handler ke semua elemen yang cocok (pengganti pola querySelectorAll berulang). */
 const bindAll = (sel, ev, fn) => document.querySelectorAll(sel).forEach((el) => el.addEventListener(ev, fn));
@@ -329,7 +329,9 @@ async function vBDash() {
       ${(me.bonusLimit || 0) > 0
         ? `<div class="muted" style="font-size:12px">termasuk bonus data diri ${fmtRp(me.bonusLimit)}</div>`
         : `<div class="muted" style="font-size:12px">Mau limit lebih besar? <a href="#" id="b-lengkapi" style="color:var(--gold)">Lengkapi data diri</a></div>`}
-      ${active ? '' : '<button class="btn btn-primary w-100 mt-3" id="b-ajukan"><i class="bi bi-plus-circle-fill me-2"></i>Ajukan Pinjaman</button>'}
+      ${active ? '' : (me.restricted
+        ? '<button class="btn btn-locked w-100 mt-3" disabled><i class="bi bi-lock-fill me-2"></i>Ajukan Pinjaman</button><p class="note warn"><i class="bi bi-lock-fill me-1"></i>Akunmu dibatasi admin. Kamu tidak bisa mengajukan pinjaman baru.</p>'
+        : '<button class="btn btn-primary w-100 mt-3" id="b-ajukan"><i class="bi bi-plus-circle-fill me-2"></i>Ajukan Pinjaman</button>')}
     </div>
     ${dueBanner(active)}
     ${rankCard}
@@ -351,6 +353,16 @@ async function vAjukan() {
   const { loans } = await api('/api/loans');
   const cd = cooldownMs(loans); // v2.3: jeda 3 hari setelah pelunasan
   if (cd > 0) { main.innerHTML = cooldownNote(cd); return; }
+  // v2.9.2: akun dibatasi — pengajuan terkunci (tombol abu + gembok).
+  if (me.restricted) {
+    main.innerHTML = `
+    <div${stagger(0, 'card')}>
+      <h3><i class="bi bi-lock-fill me-2" style="color:var(--danger)"></i>Ajukan Pinjaman</h3>
+      <p class="note warn"><i class="bi bi-lock-fill me-1"></i>Akunmu dibatasi oleh admin. Kamu tidak bisa mengajukan pinjaman baru sampai pembatasan dilepas. Pinjaman berjalan tetap bisa dibayar seperti biasa.</p>
+      <button class="btn btn-locked w-100 mt-3" disabled><i class="bi bi-lock-fill me-2"></i>Ajukan Pinjaman</button>
+    </div>`;
+    return;
+  }
   const eff = Math.floor(((me.effectiveLimit ?? me.limit) || 0) / 1000) * 1000;
   const defPokok = eff >= 500000 ? 500000 : eff;
   main.innerHTML = `
@@ -781,12 +793,13 @@ async function vPeminjam() {
     <div class="section-title">Peminjam aktif (${act.length})</div>
     ${act.map((b, i) => `
       <div${stagger(i, 'card')}><div class="d-flex justify-content-between align-items-center mb-2"><div>
-        <strong>${esc(b.name)}</strong> ${b.rank ? `<span class="badge" style="background:#e8c26a22;color:var(--gold);border:1px solid #e8c26a66"><i class="bi bi-award me-1"></i>${esc(b.rank)}</span>` : ''}
+        <strong>${esc(b.name)}</strong> ${b.rank ? `<span class="badge" style="background:#e8c26a22;color:var(--gold);border:1px solid #e8c26a66"><i class="bi bi-award me-1"></i>${esc(b.rank)}</span>` : ''} ${b.restricted ? `<span class="badge" style="background:#f8717122;color:var(--danger);border:2px solid #f8717166"><i class="bi bi-lock-fill me-1"></i>Dibatasi</span>` : ''}
         <div class="muted">${esc(b.phone)} &middot; ${b.stats.payments}x bayar &middot; ${b.stats.loansLunas}x lunas &middot; ${fmtRp(b.stats.totalPinjam)} dipinjam</div>
       </div>${badge(b.status)}</div>
         <label class="form-label">Limit (Rp)</label>
         <div class="d-flex gap-2"><input type="number" id="l-${b.phone}" class="form-control" value="${b.limit}">
         <button class="btn btn-outline-light btn-sm" data-lim="${b.phone}">Simpan</button></div>
+        <button class="btn ${b.restricted ? 'btn-primary' : 'btn-outline-light'} btn-sm w-100 mt-2" data-restrict="${b.phone}" data-on="${b.restricted ? '0' : '1'}"><i class="bi ${b.restricted ? 'bi-unlock-fill' : 'bi-lock-fill'} me-1"></i>${b.restricted ? 'Lepas Pembatasan' : 'Batasi Akun'}</button>
         <button class="btn btn-outline-light btn-sm w-100 mt-2" data-detail="${b.phone}"><i class="bi bi-person-lines-fill me-1"></i>Lihat Data Lengkap</button>
         <button class="btn btn-outline-danger btn-sm w-100 mt-2" data-del="${b.phone}"><i class="bi bi-trash-fill me-1"></i>Hapus Akun</button>
       </div>`).join('') || `<div class="card anim-in"><p class="muted mb-0">Belum ada.</p></div>`}`;
@@ -795,6 +808,15 @@ async function vPeminjam() {
     try {
       await api('/api/borrowers', 'POST', { action: 'delete', phone: b.dataset.del });
       toast('Akun dihapus.');
+      go('peminjam');
+    } catch (e) { toast(e.message, true); }
+  }));
+  main.querySelectorAll('[data-restrict]').forEach((b) => b.addEventListener('click', async () => {
+    const on = b.dataset.on === '1';
+    if (!confirm(on ? `Batasi akun ${b.dataset.restrict}? Peminjam tidak bisa mengajukan pinjaman baru sampai dilepas.` : `Lepas pembatasan akun ${b.dataset.restrict}?`)) return;
+    try {
+      await api('/api/borrowers', 'POST', { action: 'restrict', phone: b.dataset.restrict, restricted: on });
+      toast(on ? 'Akun dibatasi.' : 'Pembatasan dilepas.');
       go('peminjam');
     } catch (e) { toast(e.message, true); }
   }));

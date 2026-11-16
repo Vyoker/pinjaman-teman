@@ -846,6 +846,32 @@ function ok(cond, label) {
   const statsEko = (await getJSON('user:081900000012')).stats;
   ok(statsEko.payments === 4 && statsEko.loansLunas === 1, 'statistik: 4 pembayaran (3 sebagian + 1 lunas), 1 pelunasan penuh');
 
+  // v2.9.2: pembatasan akun oleh admin
+  r = await call('../api/auth', { method: 'POST', body: { action: 'register', name: 'Hadi', phone: '081900000013', password: 'hadi1234' } });
+  ok(r.json.ok, 'registrasi Hadi');
+  r = await call('../api/borrowers', { method: 'POST', headers: auth(tA), body: { phone: '081900000013', approve: true, limit: 500000 } });
+  ok(r.json.ok, 'admin setujui Hadi, limit 500rb');
+  const tHadi = (await call('../api/auth', { method: 'POST', body: { action: 'login', phone: '081900000013', password: 'hadi1234' } })).json.token;
+  // peminjam tidak bisa batasi akun sendiri (endpoint admin-only)
+  r = await call('../api/borrowers', { method: 'POST', headers: auth(tHadi), body: { action: 'restrict', phone: '081900000013', restricted: true } });
+  ok(r.status === 403, 'peminjam ditolak batasi akun (403)');
+  // admin batasi -> pengajuan ditolak, flag terlihat di /api/me & daftar peminjam
+  r = await call('../api/borrowers', { method: 'POST', headers: auth(tA), body: { action: 'restrict', phone: '081900000013', restricted: true } });
+  ok(r.json.ok && r.json.restricted === true, 'admin batasi akun Hadi');
+  r = await call('../api/me', { method: 'GET', headers: auth(tHadi) });
+  ok(r.json.restricted === true, '/api/me: flag restricted true');
+  r = await call('../api/borrowers', { method: 'GET', headers: auth(tA) });
+  ok(r.json.borrowers.find((b) => b.phone === '081900000013').restricted === true, 'daftar peminjam: Hadi ditandai dibatasi');
+  r = await call('../api/loans', { method: 'POST', headers: auth(tHadi), body: { pokok: 100000 } });
+  ok(r.status === 400 && /dibatasi/i.test(r.json.error), 'pengajuan saat dibatasi ditolak');
+  // admin lepas pembatasan -> pengajuan bisa lagi
+  r = await call('../api/borrowers', { method: 'POST', headers: auth(tA), body: { action: 'restrict', phone: '081900000013', restricted: false } });
+  ok(r.json.ok && r.json.restricted === false, 'admin lepas pembatasan Hadi');
+  r = await call('../api/me', { method: 'GET', headers: auth(tHadi) });
+  ok(r.json.restricted === false, '/api/me: flag restricted false');
+  r = await call('../api/loans', { method: 'POST', headers: auth(tHadi), body: { pokok: 100000 } });
+  ok(r.json.ok && r.json.loan.status === 'diajukan', 'pengajuan setelah dilepas diterima');
+
   console.log(`\nSEMUA TES LOLOS (${n} asersi)`);
 })().catch((e) => {
   console.error('\nTES GAGAL:', e.message);

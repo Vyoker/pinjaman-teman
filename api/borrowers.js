@@ -21,6 +21,7 @@ async function listUsers() {
       createdAt: u.createdAt, stats, rank: current ? current.name : null,
       pencairan: u.pencairan || null,
       profile: u.profile || null, // v2.6: detail data user untuk admin
+      restricted: !!u.restricted, restrictedAt: u.restrictedAt || null, // v2.9.2
     });
   }
   return out;
@@ -109,6 +110,31 @@ module.exports = requireAuth(async (req, res) => {
         await setJSON('idx:notifs', ids);
         await audit('reset-password', actor, `${target.name} (${ph}): password direset admin, ${n} sesi dihanguskan.`);
         return send(res, 200, { ok: true, sessions: n });
+      }
+      // v2.9.2: admin batasi / lepas pembatasan akun peminjam.
+      // Akun yang dibatasi tidak bisa mengajukan pinjaman baru (tetap bisa
+      // bayar pinjaman berjalan & login seperti biasa).
+      if (body.action === 'restrict') {
+        const ph = normPhone(body.phone);
+        const target = await getJSON('user:' + ph);
+        if (!target) return send(res, 404, { ok: false, error: 'Peminjam tidak ditemukan.' });
+        const on = body.restricted !== false;
+        target.restricted = on;
+        target.restrictedAt = on ? new Date().toISOString() : null;
+        await setJSON('user:' + ph, target);
+        const nid = await nextId('notif');
+        await setJSON('notif:' + nid, {
+          id: nid, to: ph, targetName: target.name,
+          message: on
+            ? 'Akunmu dibatasi oleh admin. Kamu tidak bisa mengajukan pinjaman baru sampai pembatasan dilepas. Pinjaman berjalan tetap bisa dibayar seperti biasa.'
+            : 'Pembatasan akunmu sudah dilepas oleh admin. Kamu bisa mengajukan pinjaman lagi.',
+          createdAt: new Date().toISOString(), kind: on ? 'restrict' : 'unrestrict',
+        });
+        const ids = (await getJSON('idx:notifs')) || [];
+        ids.push(nid);
+        await setJSON('idx:notifs', ids);
+        await audit(on ? 'batasi-akun' : 'lepas-batasan', actor, `${target.name} (${ph}).`);
+        return send(res, 200, { ok: true, restricted: on });
       }
       const { approve, limit } = body;
       const ph = normPhone(body.phone);

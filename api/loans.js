@@ -64,6 +64,8 @@ module.exports = requireAuth(async (req, res) => {
       if (pk < MIN_POKOK) return send(res, 400, { ok: false, error: 'Minimal pengajuan Rp10.000.' });
       const user = await getJSON('user:' + sess.phone);
       if (!user || user.status !== 'active') return send(res, 403, { ok: false, error: 'Akun tidak aktif.' });
+      // v2.9.2: akun dibatasi admin — tidak bisa mengajukan pinjaman baru.
+      if (user.restricted) return send(res, 400, { ok: false, error: 'Akun dibatasi admin. Kamu tidak bisa mengajukan pinjaman baru.' });
       if (pk > effectiveLimit(user)) {
         return send(res, 400, { ok: false, error: 'Pokok melebihi limit kamu.' });
       }

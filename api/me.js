@@ -19,6 +19,7 @@ module.exports = requireAuth(async (req, res) => {
     out.effectiveLimit = user ? effectiveLimit(user) : 0;
     out.pencairan = user ? user.pencairan || null : null;
     out.status = user ? user.status : 'unknown';
+    out.restricted = user ? !!user.restricted : false; // v2.9.2: akun dibatasi admin
     out.stats = stats;
     out.rank = current;
     out.nextRank = next;

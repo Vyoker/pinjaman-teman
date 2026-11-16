@@ -10,22 +10,22 @@ Biaya layanan Rp 2.000 per pinjaman, biaya pencairan Rp 2.500 per pinjaman.
 Bayar via Dana, ShopeePay, atau QRIS (QRIS +1% MDR). Denda telat 1% per hari
 dari tagihan yang lewat jatuh tempo.
 
-## Yang baru di v2.9.1
+## Yang baru di v2.9.2
 
-- **Perbaikan bug nominal dashboard (berlaku untuk semua peminjam):** setelah
-  bayar sebagian, dashboard admin masih menghitung dari total awal. Sekarang
-  semua nominal memakai sisa pokok: Total outstanding, daftar telat & jatuh
-  tempo minggu ini, dan pesan pengingat admin. Contoh Enjang (total
-  Rp1.009.000, sudah bayar sebagian Rp50.000): outstanding sekarang
-  Rp959.000 (bukan Rp1.009.000), dan kalau telat 4 hari totalnya Rp997.360
-  (denda Rp38.360 dari sisa, bukan Rp1.049.360).
-- Kartu pinjaman admin kini menampilkan "Sudah dibayar" yang menghitung
-  bayar sebagian juga (sebelumnya Rp0 padahal sudah ada bayar sebagian),
-  plus baris baru "Sisa tagihan" agar sisa yang harus ditagih langsung
-  kelihatan.
-- Pengajuan pakai input (bukan slider), minimal Rp10.000 dan tidak melebihi
-  total limit. Tema neo-brutalism dengan gradasi emerald/emas, background
-  garis list transparan.
+- **Pembatasan akun oleh admin:** di menu Peminjam, tiap kartu peminjam aktif
+  kini ada tombol "Batasi Akun" (dan "Lepas Pembatasan" kalau sudah dibatasi),
+  plus badge "Dibatasi" di kartu yang sedang dibatasi. Admin bisa memilih
+  user mana saja dan melepas pembatasannya kembali kapan saja. Peminjam
+  mendapat notifikasi in-app saat dibatasi maupun saat dilepas, dan aksi ini
+  tercatat di audit log.
+- **Di sisi peminjam yang dibatasi:** tombol "Ajukan Pinjaman" berubah jadi
+  abu-abu dengan gambar kunci gembok dan tidak bisa ditekan, baik di dashboard
+  maupun di halaman Ajukan. Server juga menolak pengajuan dari akun yang
+  dibatasi, jadi tidak bisa diakali lewat jalur lain. Login dan pembayaran
+  pinjaman berjalan tetap bisa seperti biasa.
+- Perbaikan bug nominal dashboard (v2.9.1): outstanding, daftar telat, pesan
+  pengingat, dan "Sudah dibayar" kini memakai sisa pokok setelah bayar
+  sebagian, plus baris baru "Sisa tagihan" di kartu pinjaman admin.
 
 ## Catatan
 

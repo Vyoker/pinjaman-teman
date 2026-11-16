@@ -196,6 +196,12 @@ label.form-label { font-size: 13px; color: var(--muted); margin: 14px 0 6px; fon
   color: #fff; border-radius: var(--radius); padding: 7px 11px;
 }
 .btn-ghost:hover { background: rgba(255,255,255,.12); color: #fff; }
+/* v2.9.2: tombol terkunci (akun dibatasi) — abu-abu + gembok */
+.btn-locked {
+  background: #2a3430 !important; border: 2px solid #3a4a41 !important;
+  color: #7d8b82 !important; box-shadow: var(--hard-sm);
+  cursor: not-allowed; opacity: 1 !important;
+}
 
 /* v2.9: input nominal pengajuan (pengganti slider) */
 .amount-wrap { position: relative; }
