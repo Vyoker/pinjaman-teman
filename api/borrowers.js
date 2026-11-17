@@ -5,7 +5,7 @@
 //   POST { action:'delete', phone }  -> hapus akun permanen (tanpa pinjaman aktif)
 const { getJSON, setJSON, ensureStats, kv, nextId } = require('../lib/store');
 const { requireAuth, readBody, send, normPhone, destroyAllSessions, hashPassword } = require('../lib/auth');
-const { rankFor, formatRp } = require('../lib/calc');
+const { rankFor, formatRp, SUB_PLANS, SUB_DURATION_MS } = require('../lib/calc');
 const { audit } = require('../lib/audit');
 
 async function listUsers() {
@@ -22,6 +22,7 @@ async function listUsers() {
       pencairan: u.pencairan || null,
       profile: u.profile || null, // v2.6: detail data user untuk admin
       restricted: !!u.restricted, restrictedAt: u.restrictedAt || null, // v2.9.2
+      subPlan: u.subPlan || null, subExpiresAt: u.subExpiresAt || null, subBonus: u.subBonus || 0, // v2.9.3
     });
   }
   return out;
@@ -135,6 +136,40 @@ module.exports = requireAuth(async (req, res) => {
         await setJSON('idx:notifs', ids);
         await audit(on ? 'batasi-akun' : 'lepas-batasan', actor, `${target.name} (${ph}).`);
         return send(res, 200, { ok: true, restricted: on });
+      }
+      // v2.9.3: admin atur paket langganan peminjam (bayar manual via QRIS,
+      // admin aktifkan setelah pembayaran terverifikasi). Berlaku 30 hari
+      // sejak diaktifkan; atur ulang = perpanjang 30 hari dari sekarang.
+      if (body.action === 'set-sub') {
+        const ph = normPhone(body.phone);
+        const plan = String(body.plan || '').toLowerCase();
+        if (plan !== 'lite' && plan !== 'pro' && plan !== '') {
+          return send(res, 400, { ok: false, error: 'Paket tidak dikenal.' });
+        }
+        const target = await getJSON('user:' + ph);
+        if (!target) return send(res, 404, { ok: false, error: 'Peminjam tidak ditemukan.' });
+        if (!plan) {
+          target.subPlan = null; target.subExpiresAt = null; target.subStartedAt = null;
+        } else {
+          const now = new Date();
+          target.subPlan = plan;
+          target.subStartedAt = now.toISOString();
+          target.subExpiresAt = new Date(now.getTime() + SUB_DURATION_MS).toISOString();
+        }
+        await setJSON('user:' + ph, target);
+        const nid = await nextId('notif');
+        await setJSON('notif:' + nid, {
+          id: nid, to: ph, targetName: target.name,
+          message: plan
+            ? `Langganan ${SUB_PLANS[plan].name} kamu sudah diaktifkan admin sampai ${target.subExpiresAt.slice(0, 10)}. Bonus limit +${formatRp(SUB_PLANS[plan].bonus)} setiap pelunasan, jeda pengajuan baru ${SUB_PLANS[plan].cooldownHours} jam.`
+            : 'Langganan kamu sudah dinonaktifkan oleh admin.',
+          createdAt: new Date().toISOString(), kind: plan ? 'sub-aktif' : 'sub-nonaktif',
+        });
+        const ids = (await getJSON('idx:notifs')) || [];
+        ids.push(nid);
+        await setJSON('idx:notifs', ids);
+        await audit(plan ? 'atur-langganan' : 'nonaktifkan-langganan', actor, `${target.name} (${ph})${plan ? `: ${SUB_PLANS[plan].name} sampai ${target.subExpiresAt.slice(0, 10)}` : ''}.`);
+        return send(res, 200, { ok: true, plan: target.subPlan || null, expiresAt: target.subExpiresAt || null });
       }
       const { approve, limit } = body;
       const ph = normPhone(body.phone);

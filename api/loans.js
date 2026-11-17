@@ -74,7 +74,7 @@ module.exports = requireAuth(async (req, res) => {
       }
       // v2.3: jeda 3 hari setelah pelunasan sebelum boleh mengajukan lagi
       const loansMine = await listLoans({ phone: sess.phone });
-      const sisa = cooldownRemaining(loansMine);
+      const sisa = cooldownRemaining(loansMine, user); // v2.9.3: durasi ikut paket langganan
       if (sisa > 0) {
         const bisa = new Date(Date.now() + sisa);
         const tgl = bisa.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });

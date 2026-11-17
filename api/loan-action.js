@@ -5,7 +5,7 @@
 //        (syarat: belum ada pembayaran sama sekali)
 const { getJSON, setJSON, nextId, ensureStats } = require('../lib/store');
 const { requireAuth, readBody, send } = require('../lib/auth');
-const { calcLoan, MIN_TENOR, maxTenorFor, calcLateFee, todayStr, formatRp, daysToNextFirst, nextFirstDate, localDateStr, sisaPokokOf, dendaBalanceOf, totalDueOf } = require('../lib/calc');
+const { calcLoan, MIN_TENOR, maxTenorFor, calcLateFee, todayStr, formatRp, daysToNextFirst, nextFirstDate, localDateStr, sisaPokokOf, dendaBalanceOf, totalDueOf, activeSubPlan, subBonusFor, SUB_PLANS } = require('../lib/calc');
 const { isPencairanComplete } = require('../lib/profile');
 const { audit } = require('../lib/audit');
 
@@ -132,17 +132,26 @@ async function partialPay(res, loan, body, actor) {
   }
   // Statistik: tiap pembayaran (sebagian maupun lunas) dihitung 1x;
   // rank hanya naik saat pinjaman lunas penuh
+  let bonusNote = '';
   const borrower = await getJSON('user:' + loan.borrowerPhone);
   if (borrower) {
     const stats = ensureStats(borrower);
     stats.payments += 1;
-    if (loan.status === 'lunas') stats.loansLunas += 1;
+    if (loan.status === 'lunas') {
+      stats.loansLunas += 1;
+      // v2.9.3: bonus kenaikan limit bila paket langganan aktif saat lunas
+      const sb = subBonusFor(borrower);
+      if (sb > 0) {
+        borrower.subBonus = (borrower.subBonus || 0) + sb;
+        bonusNote = ` Bonus langganan ${SUB_PLANS[activeSubPlan(borrower)].name}: limit naik ${formatRp(sb)}.`;
+      }
+    }
     await setJSON('user:' + loan.borrowerPhone, borrower);
   }
   await setJSON('loan:' + loan.id, loan);
   const judul = loan.metode === 'cicilan' ? `Cicilan ${item.n}/${loan.nCicilan}` : 'Pelunasan';
   const message = settled
-    ? `Admin mencatat ${judul} sebagai LUNAS (tunai ke admin, ${paidDate}) — bayar sebagian terakhir ${formatRp(amount)}. Terima kasih.`
+    ? `Admin mencatat ${judul} sebagai LUNAS (tunai ke admin, ${paidDate}) — bayar sebagian terakhir ${formatRp(amount)}. Terima kasih.${bonusNote}`
     : `Admin mencatat pembayaran tunai sebagian ${formatRp(amount)} untuk ${judul} (${paidDate})${dendaPaid > 0 ? ` — denda dibayar ${formatRp(dendaPaid)}` : ''}. Sisa tagihan ${formatRp(item.sisaPokok)}${item.dendaBalance > 0 ? ` + tunggakan denda ${formatRp(item.dendaBalance)}` : ''}.`;
   const id = await nextId('notif');
   await setJSON('notif:' + id, {
@@ -184,17 +193,26 @@ async function manualPay(res, loan, body, actor) {
   item.manualNote = note || 'Tunai ke admin';
   if (loan.schedule.every((s) => s.status === 'lunas')) { loan.status = 'lunas'; loan.lunasAt = new Date().toISOString(); }
   // Statistik peminjam (untuk sistem rank) — sama seperti konfirmasi klaim
+  let bonusNote = '';
   const borrower = await getJSON('user:' + loan.borrowerPhone);
   if (borrower) {
     const stats = ensureStats(borrower);
     stats.payments += 1;
-    if (loan.status === 'lunas') stats.loansLunas += 1;
+    if (loan.status === 'lunas') {
+      stats.loansLunas += 1;
+      // v2.9.3: bonus kenaikan limit bila paket langganan aktif saat lunas
+      const sb = subBonusFor(borrower);
+      if (sb > 0) {
+        borrower.subBonus = (borrower.subBonus || 0) + sb;
+        bonusNote = ` Bonus langganan ${SUB_PLANS[activeSubPlan(borrower)].name}: limit naik ${formatRp(sb)}.`;
+      }
+    }
     await setJSON('user:' + loan.borrowerPhone, borrower);
   }
   await setJSON('loan:' + loan.id, loan);
   // Notifikasi ke peminjam
   const judul = loan.metode === 'cicilan' ? `Cicilan ${item.n}/${loan.nCicilan}` : 'Pelunasan';
-  const message = `Admin mencatat ${judul} ${formatRp(totalDue)} sebagai LUNAS (tunai ke admin, ${paidDate})${daysLate > 0 ? ` — termasuk denda ${formatRp(lateFee)} (telat ${daysLate} hari)` : ''}. Terima kasih.`;
+  const message = `Admin mencatat ${judul} ${formatRp(totalDue)} sebagai LUNAS (tunai ke admin, ${paidDate})${daysLate > 0 ? ` — termasuk denda ${formatRp(lateFee)} (telat ${daysLate} hari)` : ''}. Terima kasih.${bonusNote}`;
   const id = await nextId('notif');
   await setJSON('notif:' + id, {
     id, to: loan.borrowerPhone, targetName: loan.borrowerName,

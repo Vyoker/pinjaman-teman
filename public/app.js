@@ -1,7 +1,7 @@
 'use strict';
 /* Pinjaman Teman — SPA frontend (Bootstrap 5 + animasi) */
 
-const APP_VERSION = '2.9.2';
+const APP_VERSION = '2.9.3';
 const $ = (s) => document.querySelector(s);
 /** Pasang handler ke semua elemen yang cocok (pengganti pola querySelectorAll berulang). */
 const bindAll = (sel, ev, fn) => document.querySelectorAll(sel).forEach((el) => el.addEventListener(ev, fn));
@@ -20,13 +20,13 @@ function fmtDate(iso) {
   const d = new Date(iso.length <= 10 ? iso + 'T00:00:00' : iso);
   return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
 }
-/** v2.3: sisa cooldown (ms); 0 bila tidak ada. */
-function cooldownMs(loans) {
+/** v2.3: sisa cooldown (ms); 0 bila tidak ada. Jam ikut paket langganan (v2.9.3). */
+function cooldownMs(loans, hours) {
   const done = loans
     .filter((l) => l.status === 'lunas' && l.lunasAt)
     .sort((a, b) => new Date(b.lunasAt) - new Date(a.lunasAt))[0];
   if (!done) return 0;
-  return Math.max(0, new Date(done.lunasAt).getTime() + 3 * 864e5 - Date.now());
+  return Math.max(0, new Date(done.lunasAt).getTime() + (hours || 72) * 3600e3 - Date.now());
 }
 /** v2.3: kartu pemberitahuan masa jeda setelah pelunasan. */
 function cooldownNote(ms) {
@@ -107,6 +107,7 @@ const NAVS = {
     ['bDash', 'Beranda', 'bi-grid-1x2-fill'],
     ['ajukan', 'Ajukan', 'bi-plus-circle-fill'],
     ['bayar', 'Bayar', 'bi-wallet2'],
+    ['langganan', 'Langganan', 'bi-gem'],
     ['riwayat', 'Riwayat', 'bi-clock-history'],
     ['akun', 'Akun', 'bi-person-fill'],
   ],
@@ -329,6 +330,7 @@ async function vBDash() {
       ${(me.bonusLimit || 0) > 0
         ? `<div class="muted" style="font-size:12px">termasuk bonus data diri ${fmtRp(me.bonusLimit)}</div>`
         : `<div class="muted" style="font-size:12px">Mau limit lebih besar? <a href="#" id="b-lengkapi" style="color:var(--gold)">Lengkapi data diri</a></div>`}
+      ${(me.subBonus || 0) > 0 ? `<div class="muted" style="font-size:12px">termasuk bonus langganan ${fmtRp(me.subBonus)}</div>` : ''}
       ${active ? '' : (me.restricted
         ? '<button class="btn btn-locked w-100 mt-3" disabled><i class="bi bi-lock-fill me-2"></i>Ajukan Pinjaman</button><p class="note warn"><i class="bi bi-lock-fill me-1"></i>Akunmu dibatasi admin. Kamu tidak bisa mengajukan pinjaman baru.</p>'
         : '<button class="btn btn-primary w-100 mt-3" id="b-ajukan"><i class="bi bi-plus-circle-fill me-2"></i>Ajukan Pinjaman</button>')}
@@ -351,7 +353,7 @@ let simTimer = null;
 async function vAjukan() {
   const me = await api('/api/me');
   const { loans } = await api('/api/loans');
-  const cd = cooldownMs(loans); // v2.3: jeda 3 hari setelah pelunasan
+  const cd = cooldownMs(loans, me.subCooldownHours); // v2.3: jeda 3 hari setelah pelunasan
   if (cd > 0) { main.innerHTML = cooldownNote(cd); return; }
   // v2.9.2: akun dibatasi — pengajuan terkunci (tombol abu + gembok).
   if (me.restricted) {
@@ -368,7 +370,7 @@ async function vAjukan() {
   main.innerHTML = `
     <div${stagger(0, 'card')}>
       <h3><i class="bi bi-plus-circle-fill me-2" style="color:var(--gold)"></i>Ajukan Pinjaman</h3>
-      <div class="kv"><span class="k">Limit kamu</span><span class="v">${fmtRp(me.effectiveLimit ?? me.limit)}${((me.bonusLimit || 0) > 0 || (me.rankBonus || 0) > 0) ? ` <span class="muted" style="font-size:12px">(bonus data ${fmtRp(me.bonusLimit || 0)} + bonus rank ${fmtRp(me.rankBonus || 0)})</span>` : ''}</span></div>
+      <div class="kv"><span class="k">Limit kamu</span><span class="v">${fmtRp(me.effectiveLimit ?? me.limit)}${((me.bonusLimit || 0) > 0 || (me.rankBonus || 0) > 0 || (me.subBonus || 0) > 0) ? ` <span class="muted" style="font-size:12px">(bonus data ${fmtRp(me.bonusLimit || 0)} + bonus rank ${fmtRp(me.rankBonus || 0)}${(me.subBonus || 0) > 0 ? ` + bonus langganan ${fmtRp(me.subBonus)}` : ''})</span>` : ''}</span></div>
       ${!me.pencairan ? '<p class="note warn"><i class="bi bi-exclamation-triangle-fill me-1"></i>Kamu belum mengisi data pencairan. Isi dulu di menu Akun agar pinjaman bisa dicairkan.</p>' : ''}
       ${eff < 10000
         ? '<p class="note warn"><i class="bi bi-exclamation-triangle-fill me-1"></i>Limit pinjamanmu belum diatur. Hubungi admin untuk mengaktifkan pengajuan.</p>'
@@ -433,6 +435,48 @@ async function vAjukan() {
       go('bDash');
     } catch (e) { toast(e.message, true); }
   });
+}
+
+/* ============ LANGGANAN (v2.9.3) ============ */
+const SUB_PLANS_UI = {
+  lite: { name: 'Lite', price: 10000, bonus: 5000, cooldownHours: 48 },
+  pro: { name: 'PRO', price: 25000, bonus: 10000, cooldownHours: 24 },
+};
+async function vLangganan() {
+  const me = await api('/api/me');
+  const plan = me.subPlan;
+  const card = (key, i) => {
+    const p = SUB_PLANS_UI[key];
+    const aktif = plan === key;
+    return `
+    <div${stagger(i, 'card')} style="${aktif ? 'border-color:var(--gold)' : ''}">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h3 class="mb-0"><i class="bi bi-gem me-2" style="color:var(--gold)"></i>${p.name}</h3>
+        ${aktif ? '<span class="badge b-lunas">Aktif</span>' : ''}
+      </div>
+      <div class="fs-4 fw-bold" style="color:var(--gold)">${fmtRp(p.price)}<span class="muted" style="font-size:13px"> /bulan</span></div>
+      <div class="kv mt-2"><span class="k">Bonus limit per pelunasan</span><span class="v">+${fmtRp(p.bonus)}</span></div>
+      <div class="kv"><span class="k">Jeda pengajuan baru</span><span class="v">${p.cooldownHours} jam</span></div>
+      <p class="muted mb-0 mt-2" style="font-size:12px">Bonus limit masuk ke limit kamu setiap kali pinjaman lunas penuh selama langganan aktif. Jeda dihitung dari pelunasan terakhir.</p>
+    </div>`;
+  };
+  main.innerHTML = `
+    <div${stagger(0, 'card hero-card')}>
+      <h3><i class="bi bi-gem me-2" style="color:var(--gold)"></i>Langganan</h3>
+      ${plan
+        ? `<div class="kv"><span class="k">Paket kamu</span><span class="v" style="color:var(--gold)">${esc(me.subPlanName)}</span></div>
+      <div class="kv"><span class="k">Berlaku sampai</span><span class="v">${fmtDate(me.subExpiresAt)}</span></div>
+      <div class="kv"><span class="k">Bonus langganan terkumpul</span><span class="v">+${fmtRp(me.subBonus || 0)}</span></div>`
+        : `<p class="muted mb-0">Kamu belum berlangganan. Tanpa langganan, jeda pengajuan baru 72 jam setelah pelunasan dan tidak ada bonus limit.</p>`}
+    </div>
+    <div class="section-title">Pilih paket</div>
+    ${card('lite', 1)}
+    ${card('pro', 2)}
+    <div${stagger(3, 'card')}>
+      <h3><i class="bi bi-qr-code me-2" style="color:var(--gold)"></i>Cara bayar (manual)</h3>
+      <p class="muted mb-0">Bayar sesuai harga paket lewat QRIS di bawah ini, lalu hubungi admin agar langgananmu diaktifkan. Langganan berlaku 30 hari sejak diaktifkan admin.</p>
+      <img src="/qris.jpg" class="qris-img" alt="QRIS">
+    </div>`;
 }
 
 async function vBayar() {
@@ -793,12 +837,20 @@ async function vPeminjam() {
     <div class="section-title">Peminjam aktif (${act.length})</div>
     ${act.map((b, i) => `
       <div${stagger(i, 'card')}><div class="d-flex justify-content-between align-items-center mb-2"><div>
-        <strong>${esc(b.name)}</strong> ${b.rank ? `<span class="badge" style="background:#e8c26a22;color:var(--gold);border:1px solid #e8c26a66"><i class="bi bi-award me-1"></i>${esc(b.rank)}</span>` : ''} ${b.restricted ? `<span class="badge" style="background:#f8717122;color:var(--danger);border:2px solid #f8717166"><i class="bi bi-lock-fill me-1"></i>Dibatasi</span>` : ''}
+        <strong>${esc(b.name)}</strong> ${b.rank ? `<span class="badge" style="background:#e8c26a22;color:var(--gold);border:1px solid #e8c26a66"><i class="bi bi-award me-1"></i>${esc(b.rank)}</span>` : ''} ${b.subPlan ? `<span class="badge" style="background:#22b07d22;color:#4ade9e;border:2px solid #22b07d66"><i class="bi bi-gem me-1"></i>${b.subPlan === 'lite' ? 'Lite' : 'PRO'}</span>` : ''} ${b.restricted ? `<span class="badge" style="background:#f8717122;color:var(--danger);border:2px solid #f8717166"><i class="bi bi-lock-fill me-1"></i>Dibatasi</span>` : ''}
         <div class="muted">${esc(b.phone)} &middot; ${b.stats.payments}x bayar &middot; ${b.stats.loansLunas}x lunas &middot; ${fmtRp(b.stats.totalPinjam)} dipinjam</div>
       </div>${badge(b.status)}</div>
         <label class="form-label">Limit (Rp)</label>
         <div class="d-flex gap-2"><input type="number" id="l-${b.phone}" class="form-control" value="${b.limit}">
         <button class="btn btn-outline-light btn-sm" data-lim="${b.phone}">Simpan</button></div>
+        <label class="form-label">Langganan</label>
+        <div class="d-flex gap-2"><select id="sub-${b.phone}" class="form-select">
+          <option value="" ${!b.subPlan ? 'selected' : ''}>Nonaktif</option>
+          <option value="lite" ${b.subPlan === 'lite' ? 'selected' : ''}>Lite — Rp10.000/bln</option>
+          <option value="pro" ${b.subPlan === 'pro' ? 'selected' : ''}>PRO — Rp25.000/bln</option>
+        </select>
+        <button class="btn btn-outline-light btn-sm" data-sub="${b.phone}">Simpan</button></div>
+        ${b.subPlan ? `<div class="muted mt-1" style="font-size:12px">${b.subPlan === 'lite' ? 'Lite' : 'PRO'} aktif sampai ${fmtDate(b.subExpiresAt)} &middot; bonus terkumpul ${fmtRp(b.subBonus || 0)}</div>` : ''}
         <button class="btn ${b.restricted ? 'btn-primary' : 'btn-outline-light'} btn-sm w-100 mt-2" data-restrict="${b.phone}" data-on="${b.restricted ? '0' : '1'}"><i class="bi ${b.restricted ? 'bi-unlock-fill' : 'bi-lock-fill'} me-1"></i>${b.restricted ? 'Lepas Pembatasan' : 'Batasi Akun'}</button>
         <button class="btn btn-outline-light btn-sm w-100 mt-2" data-detail="${b.phone}"><i class="bi bi-person-lines-fill me-1"></i>Lihat Data Lengkap</button>
         <button class="btn btn-outline-danger btn-sm w-100 mt-2" data-del="${b.phone}"><i class="bi bi-trash-fill me-1"></i>Hapus Akun</button>
@@ -838,6 +890,15 @@ async function vPeminjam() {
     try {
       await api('/api/borrowers', 'POST', { phone: b.dataset.lim, approve: true, limit: Number($('#l-' + b.dataset.lim).value) });
       toast('Limit diperbarui.');
+    } catch (e) { toast(e.message, true); }
+  }));
+  main.querySelectorAll('[data-sub]').forEach((b) => b.addEventListener('click', async () => {
+    const plan = $('#sub-' + b.dataset.sub).value;
+    if (!confirm(plan ? `Aktifkan langganan ${plan === 'lite' ? 'Lite' : 'PRO'} untuk ${b.dataset.sub} (30 hari, pastikan bayar manual via QRIS sudah diterima)?` : `Nonaktifkan langganan ${b.dataset.sub}?`)) return;
+    try {
+      await api('/api/borrowers', 'POST', { action: 'set-sub', phone: b.dataset.sub, plan });
+      toast(plan ? 'Langganan diaktifkan.' : 'Langganan dinonaktifkan.');
+      go('peminjam');
     } catch (e) { toast(e.message, true); }
   }));
   main.querySelectorAll('[data-detail]').forEach((b) => b.addEventListener('click', () => {
@@ -1399,7 +1460,7 @@ async function vBroadcast() {
 
 const VIEWS = {
   login: vLogin, register: vRegister,
-  bDash: vBDash, ajukan: vAjukan, bayar: vBayar, riwayat: vRiwayat, akun: vAkun, notif: vNotif,
+  bDash: vBDash, ajukan: vAjukan, bayar: vBayar, langganan: vLangganan, riwayat: vRiwayat, akun: vAkun, notif: vNotif,
   aDash: vADash, pengajuan: vPengajuan, klaim: vKlaim, peminjam: vPeminjam, verifikasi: vVerifikasi, broadcast: vBroadcast, audit: vAudit, pengaturan: vPengaturan,
 };
 

@@ -10,22 +10,22 @@ Biaya layanan Rp 2.000 per pinjaman, biaya pencairan Rp 2.500 per pinjaman.
 Bayar via Dana, ShopeePay, atau QRIS (QRIS +1% MDR). Denda telat 1% per hari
 dari tagihan yang lewat jatuh tempo.
 
-## Yang baru di v2.9.2
+## Yang baru di v2.9.3
 
-- **Pembatasan akun oleh admin:** di menu Peminjam, tiap kartu peminjam aktif
-  kini ada tombol "Batasi Akun" (dan "Lepas Pembatasan" kalau sudah dibatasi),
-  plus badge "Dibatasi" di kartu yang sedang dibatasi. Admin bisa memilih
-  user mana saja dan melepas pembatasannya kembali kapan saja. Peminjam
-  mendapat notifikasi in-app saat dibatasi maupun saat dilepas, dan aksi ini
-  tercatat di audit log.
-- **Di sisi peminjam yang dibatasi:** tombol "Ajukan Pinjaman" berubah jadi
-  abu-abu dengan gambar kunci gembok dan tidak bisa ditekan, baik di dashboard
-  maupun di halaman Ajukan. Server juga menolak pengajuan dari akun yang
-  dibatasi, jadi tidak bisa diakali lewat jalur lain. Login dan pembayaran
-  pinjaman berjalan tetap bisa seperti biasa.
-- Perbaikan bug nominal dashboard (v2.9.1): outstanding, daftar telat, pesan
-  pengingat, dan "Sudah dibayar" kini memakai sisa pokok setelah bayar
-  sebagian, plus baris baru "Sisa tagihan" di kartu pinjaman admin.
+- **Langganan (subscription):** dua paket bulanan — Lite Rp10.000/bulan
+  (bonus limit +Rp5.000 setiap pelunasan, jeda pengajuan baru 48 jam) dan
+  PRO Rp25.000/bulan (bonus +Rp10.000 setiap pelunasan, jeda 24 jam).
+  Tanpa langganan, jeda tetap 72 jam dan tidak ada bonus.
+- **Bayar manual via QRIS:** peminjam membayar lewat QRIS di menu Langganan
+  (sama seperti bayar pinjaman), lalu menghubungi admin. Admin mengaktifkan
+  paketnya dari menu Peminjam — berlaku 30 hari sejak diaktifkan; atur ulang
+  paket yang sama = perpanjang 30 hari. Bonus limit yang sudah terkumpul
+  tetap tersimpan walau langganan habis.
+- Menu Langganan baru di peminjam: status paket & masa berlaku, bonus
+  terkumpul, perbandingan paket, dan QRIS. Admin melihat badge paket di kartu
+  peminjam (Lite/PRO) beserta masa berlaku dan bonus terkumpul.
+- Pembatasan akun tetap ada: admin bisa batasi/lepas akun dari menu Peminjam;
+  peminjam yang dibatasi melihat tombol Ajukan abu-abu bergembok.
 
 ## Catatan
 

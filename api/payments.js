@@ -7,7 +7,7 @@
 //   POST { action:'confirm', claimId, approve } (admin) -> konfirmasi/tolak klaim
 const { getJSON, setJSON, nextId, ensureStats } = require('../lib/store');
 const { requireAuth, readBody, send } = require('../lib/auth');
-const { amountWithMethod, calcLateFee, todayStr, totalDueOf, sisaPokokOf } = require('../lib/calc');
+const { amountWithMethod, calcLateFee, todayStr, totalDueOf, sisaPokokOf, formatRp, activeSubPlan, subBonusFor, SUB_PLANS } = require('../lib/calc');
 
 async function idxPush(key, val) {
   const arr = (await getJSON(key)) || [];
@@ -113,7 +113,12 @@ module.exports = requireAuth(async (req, res) => {
         if (borrower) {
           const stats = ensureStats(borrower);
           stats.payments += 1;
-          if (loan.status === 'lunas') stats.loansLunas += 1;
+          if (loan.status === 'lunas') {
+            stats.loansLunas += 1;
+            // v2.9.3: bonus kenaikan limit bila paket langganan aktif saat lunas
+            const sb = subBonusFor(borrower);
+            if (sb > 0) borrower.subBonus = (borrower.subBonus || 0) + sb;
+          }
           await setJSON('user:' + loan.borrowerPhone, borrower);
         }
       } else {
