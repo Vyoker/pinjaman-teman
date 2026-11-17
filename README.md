@@ -10,22 +10,23 @@ Biaya layanan Rp 2.000 per pinjaman, biaya pencairan Rp 2.500 per pinjaman.
 Bayar via Dana, ShopeePay, atau QRIS (QRIS +1% MDR). Denda telat 1% per hari
 dari tagihan yang lewat jatuh tempo.
 
-## Yang baru di v2.9.3
+## Yang baru di v2.9.4
 
-- **Langganan (subscription):** dua paket bulanan — Lite Rp10.000/bulan
-  (bonus limit +Rp5.000 setiap pelunasan, jeda pengajuan baru 48 jam) dan
-  PRO Rp25.000/bulan (bonus +Rp10.000 setiap pelunasan, jeda 24 jam).
-  Tanpa langganan, jeda tetap 72 jam dan tidak ada bonus.
-- **Bayar manual via QRIS:** peminjam membayar lewat QRIS di menu Langganan
-  (sama seperti bayar pinjaman), lalu menghubungi admin. Admin mengaktifkan
-  paketnya dari menu Peminjam — berlaku 30 hari sejak diaktifkan; atur ulang
-  paket yang sama = perpanjang 30 hari. Bonus limit yang sudah terkumpul
-  tetap tersimpan walau langganan habis.
-- Menu Langganan baru di peminjam: status paket & masa berlaku, bonus
-  terkumpul, perbandingan paket, dan QRIS. Admin melihat badge paket di kartu
-  peminjam (Lite/PRO) beserta masa berlaku dan bonus terkumpul.
-- Pembatasan akun tetap ada: admin bisa batasi/lepas akun dari menu Peminjam;
-  peminjam yang dibatasi melihat tombol Ajukan abu-abu bergembok.
+- **Background kotak-kotak ala AfiStore:** garis grid hijau membentuk kotak,
+  plus 6 kotak melayang yang bergerak halus naik-turun (animasi 11–19 detik,
+  warna hijau dipertahankan; garis emas lama dihapus).
+- **Menu Langganan compact:** tiap paket kini hanya menampilkan judul
+  (nama + harga/bulan) — klik untuk membuka keterangan lengkap (bonus limit,
+  jeda pengajuan), lalu tombol "Langganan"/"Perpanjang" pindah ke tampilan
+  QRIS paket yang dipilih, lengkap dengan tombol "Pilih paket lain".
+- **Slider info di dashboard:** 3 slide untuk informasi terbaru, animasi fade
+  dari kanan ke kiri, pindah otomatis tiap 10 detik, bisa diketuk titiknya
+  untuk pindah manual. Gambar diambil dari `public/info-1.jpg`,
+  `public/info-2.jpg`, `public/info-3.jpg` — kalau gambar belum ada, tampil
+  placeholder "Gambar menyusul".
+- Langganan tetap ada: Lite Rp10.000/bulan (+Rp5.000 limit per pelunasan,
+  jeda 48 jam), PRO Rp25.000/bulan (+Rp10.000, jeda 24 jam), bayar manual via
+  QRIS lalu admin aktifkan dari menu Peminjam (30 hari).
 
 ## Catatan
 

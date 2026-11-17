@@ -960,6 +960,18 @@ function ok(cond, label) {
   r = await call('../api/loans', { method: 'POST', headers: auth(tJoko), body: { pokok: 100000 } });
   ok(r.status === 400 && /jeda/i.test(r.json.error), 'paket kedaluwarsa: jeda kembali 72 jam');
 
+  // v2.9.4: UI — background kotak, langganan compact, slider info
+  const fs = require('fs');
+  const path = require('path');
+  const appJs = fs.readFileSync(path.join(__dirname, '../public/app.js'), 'utf8');
+  const css = fs.readFileSync(path.join(__dirname, '../public/styles.css'), 'utf8');
+  const idxHtml = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
+  ok(css.includes('floatSq') && css.includes('repeating-linear-gradient(90deg'), 'background: kotak hijau + animasi halus');
+  ok((idxHtml.match(/class="sq"/g) || []).length >= 4, 'background: kotak melayang di index.html');
+  ok(appJs.includes('subPayPlan') && appJs.includes('data-subhead') && appJs.includes('sub-back'), 'langganan: accordion + tombol ke tampilan QRIS');
+  ok(appJs.includes('infoSlider') && appJs.includes('INFO_SLIDES') && appJs.includes('10000'), 'dashboard: slider 3 info, 10 detik');
+  ok(css.includes('.info-slide') && css.includes('translateX(-60px)'), 'slider: fade kanan ke kiri');
+
   console.log(`\nSEMUA TES LOLOS (${n} asersi)`);
 })().catch((e) => {
   console.error('\nTES GAGAL:', e.message);

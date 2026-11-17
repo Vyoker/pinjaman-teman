@@ -1,7 +1,7 @@
 'use strict';
 /* Pinjaman Teman — SPA frontend (Bootstrap 5 + animasi) */
 
-const APP_VERSION = '2.9.3';
+const APP_VERSION = '2.9.4';
 const $ = (s) => document.querySelector(s);
 /** Pasang handler ke semua elemen yang cocok (pengganti pola querySelectorAll berulang). */
 const bindAll = (sel, ev, fn) => document.querySelectorAll(sel).forEach((el) => el.addEventListener(ev, fn));
@@ -142,6 +142,7 @@ function skeleton() {
 }
 
 async function go(view) {
+  if (S._infoTimer) { clearInterval(S._infoTimer); S._infoTimer = null; } // v2.9.4: matikan slider info
   S._view = view;
   renderChrome();
   main.innerHTML = skeleton();
@@ -298,6 +299,46 @@ function dueBanner(active) {
     </div>`;
 }
 
+/** v2.9.4: slider info dashboard — 3 slide, fade kanan ke kiri, 10 detik.
+ * Gambar: /info-1.jpg, /info-2.jpg, /info-3.jpg di folder public.
+ * Kalau gambar belum ada, tampil placeholder "Gambar menyusul". */
+const INFO_SLIDES = ['/info-1.jpg', '/info-2.jpg', '/info-3.jpg'];
+function infoSliderHtml() {
+  return `
+  <div class="info-slider" id="infoSlider">
+    ${INFO_SLIDES.map((src, i) => `
+    <div class="info-slide${i === 0 ? ' active' : ''}">
+      <div class="info-fallback"><i class="bi bi-megaphone-fill"></i><span>Info Terbaru ${i + 1}</span><small>Gambar menyusul</small></div>
+      <img src="${src}" alt="Info terbaru ${i + 1}" onerror="this.style.display='none'">
+    </div>`).join('')}
+    <div class="info-dots">${INFO_SLIDES.map((_, i) => `<button class="info-dot${i === 0 ? ' on' : ''}" data-i="${i}" aria-label="Info ${i + 1}"></button>`).join('')}</div>
+  </div>`;
+}
+function startInfoSlider() {
+  const slider = $('#infoSlider');
+  if (!slider) return;
+  const slides = slider.querySelectorAll('.info-slide');
+  const dots = slider.querySelectorAll('.info-dot');
+  let idx = 0;
+  const show = (n) => {
+    const prev = slides[idx];
+    idx = (n + slides.length) % slides.length;
+    if (prev === slides[idx]) return;
+    prev.classList.remove('active');
+    prev.classList.add('exit');
+    setTimeout(() => prev.classList.remove('exit'), 900);
+    slides[idx].classList.add('active');
+    dots.forEach((d, i) => d.classList.toggle('on', i === idx));
+  };
+  if (S._infoTimer) clearInterval(S._infoTimer);
+  S._infoTimer = setInterval(() => show(idx + 1), 10000);
+  dots.forEach((d) => d.addEventListener('click', () => {
+    clearInterval(S._infoTimer);
+    show(Number(d.dataset.i));
+    S._infoTimer = setInterval(() => show(idx + 1), 10000);
+  }));
+}
+
 async function vBDash() {
   const me = await api('/api/me');
   S.name = me.name; S.phone = me.phone;
@@ -335,6 +376,7 @@ async function vBDash() {
         ? '<button class="btn btn-locked w-100 mt-3" disabled><i class="bi bi-lock-fill me-2"></i>Ajukan Pinjaman</button><p class="note warn"><i class="bi bi-lock-fill me-1"></i>Akunmu dibatasi admin. Kamu tidak bisa mengajukan pinjaman baru.</p>'
         : '<button class="btn btn-primary w-100 mt-3" id="b-ajukan"><i class="bi bi-plus-circle-fill me-2"></i>Ajukan Pinjaman</button>')}
     </div>
+    ${infoSliderHtml()}
     ${dueBanner(active)}
     ${rankCard}
     <div class="section-title">Pinjaman berjalan</div>
@@ -347,6 +389,7 @@ async function vBDash() {
   if (bc) bc.addEventListener('click', () => go('bayar'));
   const bl = $('#b-lengkapi');
   if (bl) bl.addEventListener('click', (e) => { e.preventDefault(); go('akun'); });
+  startInfoSlider();
 }
 
 let simTimer = null;
@@ -437,27 +480,55 @@ async function vAjukan() {
   });
 }
 
-/* ============ LANGGANAN (v2.9.3) ============ */
+/* ============ LANGGANAN (v2.9.3, compact v2.9.4) ============ */
 const SUB_PLANS_UI = {
   lite: { name: 'Lite', price: 10000, bonus: 5000, cooldownHours: 48 },
   pro: { name: 'PRO', price: 25000, bonus: 10000, cooldownHours: 24 },
 };
 async function vLangganan() {
   const me = await api('/api/me');
+  S.subPayPlan = null; // tiap kunjungan mulai dari daftar paket
+  S.subOpen = me.subPlan || null; // paket aktif langsung terbuka
+  renderSub(me);
+}
+
+function renderSub(me) {
   const plan = me.subPlan;
+  const pay = S.subPayPlan;
+  // --- tampilan QRIS: setelah tombol Langganan ditekan ---
+  if (pay) {
+    const p = SUB_PLANS_UI[pay];
+    main.innerHTML = `
+    <div${stagger(0, 'card hero-card')}>
+      <h3><i class="bi bi-qr-code me-2" style="color:var(--gold)"></i>Bayar Langganan ${p.name}</h3>
+      <div class="kv"><span class="k">Paket</span><span class="v" style="color:var(--gold)">${p.name}</span></div>
+      <div class="kv"><span class="k">Harga</span><span class="v">${fmtRp(p.price)} /bulan</span></div>
+      <p class="muted mb-0 mt-2">Bayar lewat QRIS di bawah ini, lalu hubungi admin agar langgananmu diaktifkan. Langganan berlaku 30 hari sejak diaktifkan admin.</p>
+      <img src="/qris.jpg" class="qris-img" alt="QRIS">
+      <button class="btn btn-outline-light w-100 mt-2" id="sub-back"><i class="bi bi-arrow-left me-1"></i>Pilih paket lain</button>
+    </div>`;
+    $('#sub-back').addEventListener('click', () => { S.subPayPlan = null; renderSub(me); });
+    return;
+  }
+  // --- daftar paket compact: judul saja, klik untuk buka keterangan ---
   const card = (key, i) => {
     const p = SUB_PLANS_UI[key];
     const aktif = plan === key;
+    const open = S.subOpen === key;
     return `
     <div${stagger(i, 'card')} style="${aktif ? 'border-color:var(--gold)' : ''}">
-      <div class="d-flex justify-content-between align-items-center mb-2">
-        <h3 class="mb-0"><i class="bi bi-gem me-2" style="color:var(--gold)"></i>${p.name}</h3>
-        ${aktif ? '<span class="badge b-lunas">Aktif</span>' : ''}
+      <div class="sub-head" data-subhead="${key}">
+        <span><i class="bi bi-gem me-2" style="color:var(--gold)"></i><strong>${p.name}</strong>
+        <span class="muted"> &middot; ${fmtRp(p.price)}/bulan</span></span>
+        <span>${aktif ? '<span class="badge b-lunas">Aktif</span> ' : ''}<i class="bi bi-chevron-${open ? 'up' : 'down'}"></i></span>
       </div>
-      <div class="fs-4 fw-bold" style="color:var(--gold)">${fmtRp(p.price)}<span class="muted" style="font-size:13px"> /bulan</span></div>
-      <div class="kv mt-2"><span class="k">Bonus limit per pelunasan</span><span class="v">+${fmtRp(p.bonus)}</span></div>
-      <div class="kv"><span class="k">Jeda pengajuan baru</span><span class="v">${p.cooldownHours} jam</span></div>
-      <p class="muted mb-0 mt-2" style="font-size:12px">Bonus limit masuk ke limit kamu setiap kali pinjaman lunas penuh selama langganan aktif. Jeda dihitung dari pelunasan terakhir.</p>
+      ${open ? `
+      <div class="anim-in mt-2">
+        <div class="kv"><span class="k">Bonus limit per pelunasan</span><span class="v">+${fmtRp(p.bonus)}</span></div>
+        <div class="kv"><span class="k">Jeda pengajuan baru</span><span class="v">${p.cooldownHours} jam</span></div>
+        <p class="muted mb-2" style="font-size:12px">Bonus limit masuk ke limit kamu setiap kali pinjaman lunas penuh selama langganan aktif. Jeda dihitung dari pelunasan terakhir.</p>
+        <button class="btn btn-primary w-100" data-subpay="${key}">${aktif ? 'Perpanjang ' : 'Langganan '}${p.name}</button>
+      </div>` : ''}
     </div>`;
   };
   main.innerHTML = `
@@ -469,14 +540,17 @@ async function vLangganan() {
       <div class="kv"><span class="k">Bonus langganan terkumpul</span><span class="v">+${fmtRp(me.subBonus || 0)}</span></div>`
         : `<p class="muted mb-0">Kamu belum berlangganan. Tanpa langganan, jeda pengajuan baru 72 jam setelah pelunasan dan tidak ada bonus limit.</p>`}
     </div>
-    <div class="section-title">Pilih paket</div>
     ${card('lite', 1)}
-    ${card('pro', 2)}
-    <div${stagger(3, 'card')}>
-      <h3><i class="bi bi-qr-code me-2" style="color:var(--gold)"></i>Cara bayar (manual)</h3>
-      <p class="muted mb-0">Bayar sesuai harga paket lewat QRIS di bawah ini, lalu hubungi admin agar langgananmu diaktifkan. Langganan berlaku 30 hari sejak diaktifkan admin.</p>
-      <img src="/qris.jpg" class="qris-img" alt="QRIS">
-    </div>`;
+    ${card('pro', 2)}`;
+  main.querySelectorAll('[data-subhead]').forEach((b) => b.addEventListener('click', () => {
+    S.subOpen = S.subOpen === b.dataset.subhead ? null : b.dataset.subhead;
+    renderSub(me);
+  }));
+  main.querySelectorAll('[data-subpay]').forEach((b) => b.addEventListener('click', () => {
+    S.subPayPlan = b.dataset.subpay;
+    renderSub(me);
+    window.scrollTo(0, 0);
+  }));
 }
 
 async function vBayar() {

@@ -30,15 +30,52 @@ body {
   min-height: 100vh;
 }
 
-/* Latar dekoratif */
+/* Latar dekoratif — kotak-kotak ala AfiStore, hijau, animasi halus (v2.9.4) */
 #bg-fx {
-  position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  position: fixed; inset: 0; z-index: -1; pointer-events: none; overflow: hidden;
   background:
-    repeating-linear-gradient(0deg, transparent 0 35px, rgba(232,194,106,.05) 35px 36px),
-    radial-gradient(600px 300px at 85% -5%, rgba(34,176,125,.14), transparent 60%),
-    radial-gradient(500px 280px at 10% 10%, rgba(232,194,106,.07), transparent 60%),
-    radial-gradient(700px 500px at 50% 110%, rgba(14,122,85,.12), transparent 60%);
+    repeating-linear-gradient(0deg, transparent 0 47px, rgba(34,176,125,.055) 47px 48px),
+    repeating-linear-gradient(90deg, transparent 0 47px, rgba(34,176,125,.055) 47px 48px),
+    radial-gradient(600px 300px at 85% -5%, rgba(34,176,125,.16), transparent 60%),
+    radial-gradient(500px 280px at 10% 10%, rgba(34,176,125,.08), transparent 60%),
+    radial-gradient(700px 500px at 50% 110%, rgba(14,122,85,.14), transparent 60%);
 }
+#bg-fx .sq {
+  position: absolute; border: 1px solid rgba(34,176,125,.28);
+  background: rgba(34,176,125,.06); border-radius: 4px;
+  animation: floatSq 14s ease-in-out infinite alternate;
+}
+#bg-fx .sq:nth-child(1) { width: 56px; height: 56px; top: 12%; left: 6%; animation-duration: 16s; }
+#bg-fx .sq:nth-child(2) { width: 34px; height: 34px; top: 22%; right: 8%; animation-duration: 12s; animation-delay: -4s; }
+#bg-fx .sq:nth-child(3) { width: 72px; height: 72px; top: 58%; left: 2%; animation-duration: 19s; animation-delay: -7s; }
+#bg-fx .sq:nth-child(4) { width: 44px; height: 44px; top: 68%; right: 12%; animation-duration: 14s; animation-delay: -2s; }
+#bg-fx .sq:nth-child(5) { width: 26px; height: 26px; top: 42%; left: 12%; animation-duration: 11s; animation-delay: -6s; }
+#bg-fx .sq:nth-child(6) { width: 60px; height: 60px; top: 84%; left: 46%; animation-duration: 17s; animation-delay: -9s; }
+@keyframes floatSq {
+  from { transform: translateY(0) rotate(0deg); opacity: .55; }
+  to { transform: translateY(-22px) rotate(8deg); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #bg-fx .sq { animation: none; }
+}
+
+/* ============ SLIDER INFO (v2.9.4) ============ */
+.info-slider { position: relative; height: 170px; border-radius: var(--radius); overflow: hidden; border: 2px solid var(--line); box-shadow: var(--hard-sm); background: var(--card); }
+.info-slide { position: absolute; inset: 0; opacity: 0; transform: translateX(60px); transition: opacity .8s ease, transform .8s ease; pointer-events: none; }
+.info-slide.active { opacity: 1; transform: translateX(0); pointer-events: auto; }
+.info-slide.exit { transform: translateX(-60px); opacity: 0; }
+.info-slide img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.info-fallback { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; background: linear-gradient(135deg, var(--emerald-deep), #123527); color: var(--ink); }
+.info-fallback i { font-size: 28px; color: var(--gold); }
+.info-fallback span { font-weight: 700; font-size: 17px; }
+.info-fallback small { color: var(--muted); font-size: 12px; }
+.info-dots { position: absolute; left: 0; right: 0; bottom: 8px; display: flex; justify-content: center; gap: 6px; z-index: 2; }
+.info-dot { width: 8px; height: 8px; border-radius: 50%; border: none; padding: 0; background: rgba(255,255,255,.35); cursor: pointer; }
+.info-dot.on { background: var(--gold); width: 22px; border-radius: 5px; }
+
+/* ============ LANGGANAN COMPACT (v2.9.4) ============ */
+.sub-head { display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none; }
+.sub-head:hover { opacity: .9; }
 
 /* ============ ANIMASI DASAR ============ */
 @keyframes rise {
