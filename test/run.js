@@ -143,7 +143,7 @@ function ok(cond, label) {
   r = await call('../api/profile', { method: 'POST', headers: auth(tB), body: { action: 'pencairan', metode: 'dana', nomor: '081299998888', atasNama: 'Budi Santoso' } });
   assert.ok(r.json.ok, 'Budi isi data pencairan');
   // 6. simulasi melebihi limit
-  r = await call('../api/simulate', { method: 'POST', headers: auth(tB), body: { pokok: 2000000 } });
+  r = await call('../api/loans', { method: 'POST', headers: auth(tB), body: { action: 'simulate', pokok: 2000000 } });
   ok(r.json.lebihDariLimit === true, 'simulasi tandai melebihi limit');
   // 7. ajukan
   r = await call('../api/loans', { method: 'POST', headers: auth(tB), body: { pokok: 500000 } });
@@ -478,9 +478,9 @@ function ok(cond, label) {
   ok(r.json.effectiveLimit === 510000, 'effectiveLimit = 500rb + 10rb bonus rank');
   ok(r.json.rank && r.json.rank.name === 'Bronze', 'rank Bronze terdeteksi (rombak retroaktif)');
   // v2.9: minimal pengajuan Rp10.000 (frontend input + backend)
-  r = await call('../api/simulate', { method: 'POST', headers: auth(tF), body: { pokok: 5000 } });
+  r = await call('../api/loans', { method: 'POST', headers: auth(tF), body: { action: 'simulate', pokok: 5000 } });
   ok(r.status === 400 && /10\.000/.test(r.json.error), 'simulate: pokok 5000 ditolak (min 10rb)');
-  r = await call('../api/simulate', { method: 'POST', headers: auth(tF), body: { pokok: 10000 } });
+  r = await call('../api/loans', { method: 'POST', headers: auth(tF), body: { action: 'simulate', pokok: 10000 } });
   ok(r.json.ok, 'simulate: pokok 10000 diterima (batas min)');
   r = await call('../api/loans', { method: 'POST', headers: auth(tF), body: { pokok: 5000 } });
   ok(r.status === 400 && /10\.000/.test(r.json.error), 'pengajuan 5000 ditolak (min 10rb)');
@@ -493,7 +493,7 @@ function ok(cond, label) {
   // simulate tutup buku: total sesuai hari sampai tanggal 1
   const daysF = calc.daysToNextFirst(new Date());
   const totF = calc.calcLoan(510000, daysF, 'lunas').total;
-  r = await call('../api/simulate', { method: 'POST', headers: auth(tF), body: { pokok: 510000 } });
+  r = await call('../api/loans', { method: 'POST', headers: auth(tF), body: { action: 'simulate', pokok: 510000 } });
   ok(r.json.ok && r.json.days === daysF && r.json.total === totF && r.json.dueDate === calc.localDateStr(calc.nextFirstDate(new Date())), 'simulate tutup buku: total sesuai hari');
   // admin approve (butuh pencairan dulu)
   r = await call('../api/profile', { method: 'POST', headers: auth(tF), body: { action: 'pencairan', metode: 'dana', nomor: '081511112222', atasNama: 'Fajar Nugroho' } });
@@ -730,11 +730,11 @@ function ok(cond, label) {
   ok(r.json.loan.schedule[0].dueDate === calc.localDateStr(calc.nextFirstDate(new Date())), 'approve tutup buku: jatuh tempo tanggal 1');
   ok(r.json.loan.total === calc.calcLoan(200000, calc.daysToNextFirst(new Date()), 'lunas').total, 'approve tutup buku: total sesuai hari');
   // simulate: pokok saja, konsisten dengan approve
-  r = await call('../api/simulate', { method: 'POST', headers: auth(tJ), body: { pokok: 200000 } });
+  r = await call('../api/loans', { method: 'POST', headers: auth(tJ), body: { action: 'simulate', pokok: 200000 } });
   ok(r.json.ok && r.json.days === calc.daysToNextFirst(new Date()) && r.json.dueDate === calc.localDateStr(calc.nextFirstDate(new Date())), 'simulate tutup buku konsisten');
 
   // ============ v2.7: biaya pencairan Rp2.500 ============
-  r = await call('../api/simulate', { method: 'POST', headers: auth(tJ), body: { pokok: 200000 } });
+  r = await call('../api/loans', { method: 'POST', headers: auth(tJ), body: { action: 'simulate', pokok: 200000 } });
   ok(r.json.biayaPencairan === 2500, 'simulate: biaya pencairan 2500');
   ok(r.json.total === 200000 + r.json.bunga + 2000 + 2500, 'simulate: total termasuk biaya pencairan');
   r = await call('../api/auth', { method: 'POST', body: { action: 'register', name: 'Dewi', phone: '081900000011', password: 'dewi1234' } });
@@ -974,7 +974,7 @@ function ok(cond, label) {
   ok(uPet0.kristal === 0 && uPet0.koin === 0 && Array.isArray(uPet0.pets) && uPet0.petFreeClaimed === false, 'ensurePetData: default user lama');
   assert.throws(() => calc.amountWithMethod(100000, 'shopeepay'), /Metode bayar/, 'ShopeePay ditolak di amountWithMethod');
   // simulasi tanpa shopeepay
-  r = await call('../api/simulate', { method: 'POST', headers: auth(tJoko), body: { pokok: 100000 } });
+  r = await call('../api/loans', { method: 'POST', headers: auth(tJoko), body: { action: 'simulate', pokok: 100000 } });
   ok(r.json.ok && r.json.totalBayar.dana && r.json.totalBayar.qris && !('shopeepay' in r.json.totalBayar), 'simulasi: hanya Dana + QRIS, tanpa ShopeePay');
   // pencairan shopeepay ditolak
   r = await call('../api/profile', { method: 'POST', headers: auth(tJoko), body: { action: 'pencairan', metode: 'shopeepay', nomor: '081900000015', atasNama: 'Joko' } });
@@ -1045,7 +1045,7 @@ function ok(cond, label) {
   // koin dipakai mengurangi pembayaran
   r = await call('../api/profile', { method: 'POST', headers: authK, body: { action: 'pencairan', metode: 'dana', nomor: '081900000016', atasNama: 'Kiki' } });
   assert.ok(r.json.ok, 'Kiki isi data pencairan');
-  r = await call('../api/simulate', { method: 'POST', headers: authK, body: { pokok: 100000 } });
+  r = await call('../api/loans', { method: 'POST', headers: authK, body: { action: 'simulate', pokok: 100000 } });
   const totalKiki = r.json.total;
   r = await call('../api/loans', { method: 'POST', headers: authK, body: { pokok: 100000 } });
   const loanKiki = r.json.loan.id;
@@ -1075,6 +1075,7 @@ function ok(cond, label) {
   const css295 = require('fs').readFileSync(require('path').join(__dirname, '../public/styles.css'), 'utf8');
   ok(appJs295.includes('vPet') && appJs295.includes("'/api/pets'") && appJs295.includes('koinUsed'), 'UI: menu Pet + pemakaian koin di lapor bayar');
   ok(!appJs295.includes('shopeepay') && !css295.includes('shopeepay'), 'UI: tidak ada lagi ShopeePay');
+  ok(require('fs').readdirSync(require('path').join(__dirname, '../api')).filter((f) => f.endsWith('.js')).length <= 12, 'Vercel Hobby: maks 12 Serverless Function');
 
   // v2.9.4: UI — background kotak, langganan compact, slider info
   const fs = require('fs');

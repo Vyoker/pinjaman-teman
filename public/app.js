@@ -445,7 +445,7 @@ async function vAjukan() {
     err.classList.add('hidden');
     if (!pokok || pokok <= 0) { $('#a-sim').innerHTML = ''; return; }
     try {
-      const s = await api('/api/simulate', 'POST', { pokok });
+      const s = await api('/api/loans', 'POST', { action: 'simulate', pokok });
       $('#a-sim').innerHTML = `
         <div class="anim-pop">
         <h4>Simulasi</h4>
@@ -809,7 +809,7 @@ async function vPengajuan() {
     const el = $('#sim-' + l.id);
     if (!el) return;
     try {
-      const s = await api('/api/simulate', 'POST', { pokok: l.pokok });
+      const s = await api('/api/loans', 'POST', { action: 'simulate', pokok: l.pokok });
       el.innerHTML = `
         <div class="kv"><span class="k">Bunga (0,2%/hari × ${s.days} hari)</span><span class="v">${fmtRp(s.bunga)}</span></div>
         <div class="kv"><span class="k">Biaya layanan</span><span class="v">${fmtRp(s.biayaLayanan)}</span></div>

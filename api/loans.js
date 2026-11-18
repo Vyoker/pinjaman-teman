@@ -3,10 +3,12 @@
 //   GET  -> daftar pinjaman (peminjam: milik sendiri; admin: semua, ?status=)
 //   POST (peminjam) { pokok } -> ajukan pinjaman (status 'diajukan');
 //     v2.5: tenor & metode ditentukan sistem (tutup buku tanggal 1).
+//   POST { action:'simulate', pokok } -> simulasi tutup buku (dulu /api/simulate,
+//     digabung ke sini di v2.9.5 karena Vercel Hobby maks 12 Serverless Function).
 const { getJSON, setJSON, nextId } = require('../lib/store');
 const { requireAuth, readBody, send } = require('../lib/auth');
-const { calcLateFee, todayStr, cooldownRemaining, daysToNextFirst, totalDueOf, MIN_POKOK } = require('../lib/calc');
-const { effectiveLimit } = require('../lib/profile');
+const { calcLateFee, todayStr, cooldownRemaining, daysToNextFirst, totalDueOf, MIN_POKOK, calcLoan, amountWithMethod, nextFirstDate, localDateStr } = require('../lib/calc');
+const { effectiveLimit, limitBonus } = require('../lib/profile');
 
 async function idxPush(key, val) {
   const arr = (await getJSON(key)) || [];
@@ -54,11 +56,40 @@ module.exports = requireAuth(async (req, res) => {
   }
 
   if (req.method === 'POST') {
-    if (sess.role !== 'borrower') return send(res, 403, { ok: false, error: 'Hanya peminjam.' });
     try {
+      const body = await readBody(req);
+      // v2.9.5: simulasi (dulu /api/simulate, digabung karena batas 12 function).
+      if (body.action === 'simulate') {
+        const pk = Number(body.pokok);
+        if (!Number.isInteger(pk) || pk <= 0) {
+          return send(res, 400, { ok: false, error: 'Pokok tidak valid.' });
+        }
+        if (pk < MIN_POKOK) {
+          return send(res, 400, { ok: false, error: 'Minimal pengajuan Rp10.000.' });
+        }
+        const days = daysToNextFirst(new Date());
+        const dueDate = localDateStr(nextFirstDate(new Date()));
+        const sim = calcLoan(pk, days, 'lunas');
+        const withPay = (amount) => ({
+          dana: amountWithMethod(amount, 'dana'),
+          qris: amountWithMethod(amount, 'qris'),
+        });
+        const schedule = sim.schedule.map((s) => ({ ...s, bayar: withPay(s.amount) }));
+        const out = { ok: true, ...sim, days, dueDate, schedule, totalBayar: withPay(sim.total) };
+        if (sess.role === 'borrower') {
+          const user = await getJSON('user:' + sess.phone);
+          const eff = user ? effectiveLimit(user) : 0;
+          out.limit = eff;
+          out.limitDasar = user ? user.limit : 0;
+          out.bonusLimit = user ? limitBonus(user.profile) : 0;
+          out.lebihDariLimit = sim.pokok > eff;
+        }
+        return send(res, 200, out);
+      }
+      if (sess.role !== 'borrower') return send(res, 403, { ok: false, error: 'Hanya peminjam.' });
       // v2.5: tutup buku — pengajuan hanya membawa pokok; tenor & metode
       // ditentukan sistem (sekali lunas, jatuh tempo tanggal 1 bulan depan).
-      const { pokok } = await readBody(req);
+      const { pokok } = body;
       const pk = Number(pokok);
       if (!Number.isInteger(pk) || pk <= 0) return send(res, 400, { ok: false, error: 'Pokok tidak valid.' });
       if (pk < MIN_POKOK) return send(res, 400, { ok: false, error: 'Minimal pengajuan Rp10.000.' });
