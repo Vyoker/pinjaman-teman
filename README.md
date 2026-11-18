@@ -7,8 +7,22 @@ mengajukan pinjaman, dan melapor bayar lewat aplikasi.
 Pinjaman baru jatuh tempo setiap tanggal 1 bulan berikutnya (tutup buku):
 bunga 0,2% per hari dihitung sampai tanggal 1, dibayar sekali lunas.
 Biaya layanan Rp 2.000 per pinjaman, biaya pencairan Rp 2.500 per pinjaman.
-Bayar via Dana, ShopeePay, atau QRIS (QRIS +1% MDR). Denda telat 1% per hari
+Bayar via Dana atau QRIS (QRIS +1% MDR). Denda telat 1% per hari
 dari tagihan yang lewat jatuh tempo.
+
+## Yang baru di v2.9.5
+
+- **ShopeePay dihapus:** bayar hanya via Dana atau QRIS (QRIS +1% MDR),
+  pencairan hanya Dana atau Bank. Riwayat lama tetap bisa dibaca.
+- **Background grid ala gaming:** grid neon hijau/emas lebih tegas, 6 kotak
+  jatuh dari atas sambil berputar dan berdenyut dengan glow.
+- **Minigame Pet (menu Pet):** pet level 1-20, merge 2 pet level sama jadi
+  1 pet level atas. Pet pertama gratis 1 ekor L1. Beli pet pakai kristal:
+  L1 500, L2 1.000 kristal, dst, harga naik x2 tiap sudah beli level sama.
+  Produksi: L1 1 kristal/2 detik, L2 2 kristal/detik, L3 4 kristal/detik, dst.
+  Farming offline maks 1 jam, standby (aplikasi dibuka) tidak ada batas.
+- **Sistem koin:** 10.000 kristal = 1 koin, 1 koin = Rp1 potongan bayar.
+  Koin dipakai saat lapor bayar; kalau klaim ditolak admin, koin kembali.
 
 ## Yang baru di v2.9.4
 

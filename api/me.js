@@ -2,7 +2,7 @@
 // GET /api/me -> profil sesi berjalan
 const { getJSON, isMemoryMode, ensureStats } = require('../lib/store');
 const { requireAuth, send } = require('../lib/auth');
-const { rankFor, rankBonusFor, activeSubPlan, cooldownHoursFor, SUB_PLANS } = require('../lib/calc');
+const { rankFor, rankBonusFor, activeSubPlan, cooldownHoursFor, SUB_PLANS, ensurePetData, petProductionPerSec } = require('../lib/calc');
 const { limitBonus, effectiveLimit } = require('../lib/profile');
 
 module.exports = requireAuth(async (req, res) => {
@@ -28,6 +28,12 @@ module.exports = requireAuth(async (req, res) => {
     out.subBonus = user ? (user.subBonus || 0) : 0;
     out.subCooldownHours = cooldownHoursFor(user);
     out.stats = stats;
+    // v2.9.5: Pet, kristal, koin
+    ensurePetData(user || {});
+    out.kristal = user ? (user.kristal || 0) : 0;
+    out.koin = user ? (user.koin || 0) : 0;
+    out.petCount = user && user.pets ? user.pets.length : 0;
+    out.petProductionPerSec = user ? petProductionPerSec(user.pets || []) : 0;
     out.rank = current;
     out.nextRank = next;
   }

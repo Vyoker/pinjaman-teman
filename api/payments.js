@@ -7,7 +7,7 @@
 //   POST { action:'confirm', claimId, approve } (admin) -> konfirmasi/tolak klaim
 const { getJSON, setJSON, nextId, ensureStats } = require('../lib/store');
 const { requireAuth, readBody, send } = require('../lib/auth');
-const { amountWithMethod, calcLateFee, todayStr, totalDueOf, sisaPokokOf, formatRp, activeSubPlan, subBonusFor, SUB_PLANS } = require('../lib/calc');
+const { amountWithMethod, calcLateFee, todayStr, totalDueOf, sisaPokokOf, formatRp, activeSubPlan, subBonusFor, SUB_PLANS, ensurePetData } = require('../lib/calc');
 
 async function idxPush(key, val) {
   const arr = (await getJSON(key)) || [];
@@ -55,8 +55,13 @@ module.exports = requireAuth(async (req, res) => {
       const item = loan.schedule[Number(schedIdx)];
       if (!item) return send(res, 400, { ok: false, error: 'Tagihan tidak valid.' });
       if (item.status !== 'belum') return send(res, 400, { ok: false, error: 'Tagihan ini sudah diproses.' });
-      if (!['dana', 'shopeepay', 'qris'].includes(payMethod)) {
+      if (!['dana', 'qris'].includes(payMethod)) {
         return send(res, 400, { ok: false, error: 'Metode bayar tidak valid.' });
+      }
+      // v2.9.5: koin dipakai mengurangi tagihan (1 koin = Rp1, hitung server).
+      const koinUsed = Number(body.koinUsed || 0);
+      if (!Number.isInteger(koinUsed) || koinUsed < 0) {
+        return send(res, 400, { ok: false, error: 'Jumlah koin tidak valid.' });
       }
       // Bukti transfer foto WAJIB (v1.6) — dataURL JPEG hasil kompresi di HP
       const proof = body.proof;
@@ -69,7 +74,21 @@ module.exports = requireAuth(async (req, res) => {
       // Denda dihitung sampai tanggal lapor bayar (v2.8: dari sisa pokok + tunggakan)
       const today = todayStr();
       const { daysLate, lateFee, totalDue } = totalDueOf(item, today);
-      const base = totalDue;
+      // v2.9.5: potongan koin mengurangi pokok tagihan SEBELUM MDR QRIS.
+      let borrower = null;
+      if (koinUsed > 0) {
+        borrower = await getJSON('user:' + sess.phone);
+        ensurePetData(borrower || {});
+        if (koinUsed > (borrower.koin || 0)) {
+          return send(res, 400, { ok: false, error: 'Koin tidak cukup.' });
+        }
+        if (koinUsed > totalDue) {
+          return send(res, 400, { ok: false, error: 'Koin melebihi total tagihan.' });
+        }
+        borrower.koin -= koinUsed;
+        await setJSON('user:' + sess.phone, borrower);
+      }
+      const base = totalDue - koinUsed;
       const amount = amountWithMethod(base, payMethod);
       const id = await nextId('claim');
       const claim = {
@@ -77,6 +96,7 @@ module.exports = requireAuth(async (req, res) => {
         borrowerPhone: sess.phone, borrowerName: loan.borrowerName,
         baseAmount: sisaPokokOf(item), lateFee, daysLate,
         amount, payMethod, proof, status: 'menunggu',
+        koinUsed, koinDiscount: koinUsed, totalBeforeKoin: totalDue,
         createdAt: new Date().toISOString(), decidedAt: null,
       };
       item.status = 'diklaim';
@@ -125,6 +145,15 @@ module.exports = requireAuth(async (req, res) => {
         claim.status = 'ditolak';
         item.status = 'belum';
         item.claimId = null;
+        // v2.9.5: koin yang dipakai dikembalikan bila klaim ditolak.
+        if (claim.koinUsed > 0) {
+          const borrower = await getJSON('user:' + claim.borrowerPhone);
+          if (borrower) {
+            ensurePetData(borrower);
+            borrower.koin = (borrower.koin || 0) + claim.koinUsed;
+            await setJSON('user:' + claim.borrowerPhone, borrower);
+          }
+        }
       }
       claim.decidedAt = new Date().toISOString();
       await setJSON('claim:' + claim.id, claim);

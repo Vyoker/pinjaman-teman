@@ -23,7 +23,7 @@ async function decide(res, loan, body, actor) {
   }
   const borrower = await getJSON('user:' + loan.borrowerPhone);
   if (!isPencairanComplete(borrower || {})) {
-    return send(res, 400, { ok: false, error: 'Peminjam belum mengisi data pencairan (Dana/ShopeePay/ATM).' });
+    return send(res, 400, { ok: false, error: 'Peminjam belum mengisi data pencairan (Dana/ATM).' });
   }
   const now = Date.now();
   let tn, metode;

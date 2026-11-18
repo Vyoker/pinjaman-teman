@@ -1,7 +1,7 @@
 'use strict';
 /* Pinjaman Teman — SPA frontend (Bootstrap 5 + animasi) */
 
-const APP_VERSION = '2.9.4';
+const APP_VERSION = '2.9.5';
 const $ = (s) => document.querySelector(s);
 /** Pasang handler ke semua elemen yang cocok (pengganti pola querySelectorAll berulang). */
 const bindAll = (sel, ev, fn) => document.querySelectorAll(sel).forEach((el) => el.addEventListener(ev, fn));
@@ -108,6 +108,7 @@ const NAVS = {
     ['ajukan', 'Ajukan', 'bi-plus-circle-fill'],
     ['bayar', 'Bayar', 'bi-wallet2'],
     ['langganan', 'Langganan', 'bi-gem'],
+    ['pet', 'Pet', 'bi-egg-fill'],
     ['riwayat', 'Riwayat', 'bi-clock-history'],
     ['akun', 'Akun', 'bi-person-fill'],
   ],
@@ -143,6 +144,7 @@ function skeleton() {
 
 async function go(view) {
   if (S._infoTimer) { clearInterval(S._infoTimer); S._infoTimer = null; } // v2.9.4: matikan slider info
+  if (S._petTimer) { clearInterval(S._petTimer); S._petTimer = null; } // v2.9.5: matikan klaim pet berkala
   S._view = view;
   renderChrome();
   main.innerHTML = skeleton();
@@ -372,6 +374,8 @@ async function vBDash() {
         ? `<div class="muted" style="font-size:12px">termasuk bonus data diri ${fmtRp(me.bonusLimit)}</div>`
         : `<div class="muted" style="font-size:12px">Mau limit lebih besar? <a href="#" id="b-lengkapi" style="color:var(--gold)">Lengkapi data diri</a></div>`}
       ${(me.subBonus || 0) > 0 ? `<div class="muted" style="font-size:12px">termasuk bonus langganan ${fmtRp(me.subBonus)}</div>` : ''}
+      <div class="kv mt-2"><span class="k"><i class="bi bi-gem me-1"></i>Kristal / Koin</span><span class="v">${Number(me.kristal || 0).toLocaleString('id-ID')} kristal &middot; ${Number(me.koin || 0).toLocaleString('id-ID')} koin</span></div>
+      <div class="muted" style="font-size:12px">Pet menghasilkan kristal, 10.000 kristal = 1 koin = Rp1 potongan bayar. <a href="#" id="b-pet" style="color:var(--gold)">Buka menu Pet</a></div>
       ${active ? '' : (me.restricted
         ? '<button class="btn btn-locked w-100 mt-3" disabled><i class="bi bi-lock-fill me-2"></i>Ajukan Pinjaman</button><p class="note warn"><i class="bi bi-lock-fill me-1"></i>Akunmu dibatasi admin. Kamu tidak bisa mengajukan pinjaman baru.</p>'
         : '<button class="btn btn-primary w-100 mt-3" id="b-ajukan"><i class="bi bi-plus-circle-fill me-2"></i>Ajukan Pinjaman</button>')}
@@ -387,6 +391,8 @@ async function vBDash() {
   if (b) b.addEventListener('click', () => go('ajukan'));
   const bc = $('#b-bayar-cepat');
   if (bc) bc.addEventListener('click', () => go('bayar'));
+  const bp = $('#b-pet');
+  if (bp) bp.addEventListener('click', (e) => { e.preventDefault(); go('pet'); });
   const bl = $('#b-lengkapi');
   if (bl) bl.addEventListener('click', (e) => { e.preventDefault(); go('akun'); });
   startInfoSlider();
@@ -449,7 +455,7 @@ async function vAjukan() {
         <div class="kv"><span class="k">Total tagihan</span><span class="v big">${fmtRp(s.total)}</span></div>
         <div class="kv"><span class="k">Jatuh tempo</span><span class="v">${fmtDate(s.dueDate)}</span></div>
         <h4>Total bayar per metode</h4>
-        <div class="kv"><span class="k"><i class="bi bi-wallet2 me-1"></i>Dana / ShopeePay</span><span class="v green">${fmtRp(s.totalBayar.dana)}</span></div>
+        <div class="kv"><span class="k"><i class="bi bi-wallet2 me-1"></i>Dana</span><span class="v green">${fmtRp(s.totalBayar.dana)}</span></div>
         <div class="kv"><span class="k"><i class="bi bi-qr-code me-1"></i>QRIS (+1% MDR)</span><span class="v">${fmtRp(s.totalBayar.qris)}</span></div>
         ${s.lebihDariLimit ? '<p class="note warn"><i class="bi bi-exclamation-triangle-fill me-1"></i>Pokok melebihi limit kamu.</p>' : ''}
         </div>`;
@@ -554,6 +560,7 @@ function renderSub(me) {
 }
 
 async function vBayar() {
+  const me = await api('/api/me');
   const { loans } = await api('/api/loans');
   const berjalan = loans.filter((l) => l.status === 'berjalan');
   const items = [];
@@ -585,10 +592,11 @@ async function vBayar() {
       <label class="form-label">Metode pembayaran</label>
       <select id="m-${key}" class="form-select">
         <option value="dana">Dana</option>
-        <option value="shopeepay">ShopeePay</option>
         <option value="qris">QRIS (+1% MDR)</option>
       </select>
       <div id="info-${key}" class="mt-2"></div>
+      <label class="form-label mt-2">Pakai koin (1 koin = Rp1 potongan, saldo kamu: ${Number(me.koin || 0).toLocaleString('id-ID')} koin)</label>
+      <input id="k-${key}" type="number" min="0" max="${Math.min(me.koin || 0, s.totalDue ?? s.amount)}" value="0" class="form-control">
       <label class="form-label mt-2">Bukti transfer (foto, wajib)</label>
       <input id="p-${key}" type="file" accept="image/*" class="form-control">
       <div id="pv-${key}" class="mt-2"></div>
@@ -602,17 +610,20 @@ async function vBayar() {
   const settings = await api('/api/settings').then((j) => j.settings).catch(() => ({}));
   const dest = {
     dana: settings.dana ? 'Dana: <strong>' + esc(settings.dana) + '</strong>' : 'Nomor Dana belum diisi admin',
-    shopeepay: settings.shopeepay ? 'ShopeePay: <strong>' + esc(settings.shopeepay) + '</strong>' : 'ShopeePay belum diisi admin',
     qris: settings.qrisNote ? 'QRIS: ' + esc(settings.qrisNote) : 'Info QRIS belum diisi admin',
   };
   const updInfo = (key, s) => {
     const m = $('#m-' + key).value;
-    const base = s.totalDue ?? s.amount;
+    const koinEl = $('#k-' + key);
+    const koinUsed = Math.max(0, Math.min(Number(koinEl ? koinEl.value : 0) || 0, me.koin || 0, s.totalDue ?? s.amount));
+    if (koinEl && Number(koinEl.value || 0) !== koinUsed) koinEl.value = koinUsed;
+    const base = (s.totalDue ?? s.amount) - koinUsed;
     const total = m === 'qris' ? Math.round(base * 1.01) : base;
     $('#info-' + key).innerHTML = `<div class="pay-info">
       <div><i class="bi bi-arrow-right-circle me-1"></i>${dest[m]}</div>
       ${m === 'qris' ? '<img src="/qris.jpg" class="qris-img" alt="QRIS">' : ''}
       ${(s.lateFee || 0) > 0 ? `<div class="muted">Tagihan ${fmtRp(s.sisaPokok ?? s.amount)} + denda telat ${fmtRp(s.lateFee)} (${s.daysLate} hari × 1%)</div>` : ''}
+      ${koinUsed > 0 ? `<div class="muted">Potongan koin: -${fmtRp(koinUsed)} (${koinUsed.toLocaleString('id-ID')} koin)</div>` : ''}
       <div class="total">Total bayar: ${fmtRp(total)}${m === 'qris' ? ' <span class="muted">(termasuk MDR 1%)</span>' : ''}</div>
       <div class="muted mt-1">Transfer dulu ke tujuan di atas, lalu tekan "Lapor Sudah Bayar".</div>
     </div>`;
@@ -621,6 +632,7 @@ async function vBayar() {
     if (s.status !== 'belum') return;
     const key = l.id + '_' + i;
     $('#m-' + key).addEventListener('change', () => updInfo(key, s));
+    const kEl = $('#k-' + key); if (kEl) kEl.addEventListener('input', () => updInfo(key, s));
     updInfo(key, s);
     $('#p-' + key).addEventListener('change', (e) => {
       const f = e.target.files[0];
@@ -638,6 +650,7 @@ async function vBayar() {
       await api('/api/payments', 'POST', {
         action: 'claim', loanId: b.dataset.loan,
         schedIdx: Number(b.dataset.idx), payMethod: $('#m-' + key).value, proof,
+        koinUsed: Math.max(0, Number($('#k-' + key).value || 0)),
       });
       toast('Laporan bayar terkirim. Menunggu konfirmasi admin.');
       go('bayar');
@@ -733,7 +746,7 @@ async function vPengajuan() {
   const pcTxt = (phone) => {
     const p = pcMap[phone];
     if (!p) return '<span style="color:var(--danger)">Belum diisi — tidak bisa dicairkan</span>';
-    const m = { dana: 'Dana', shopeepay: 'ShopeePay', bank: 'Bank' }[p.metode] || p.metode;
+    const m = { dana: 'Dana', bank: 'Bank' }[p.metode] || p.metode;
     return `${m}${p.namaBank ? ' ' + esc(p.namaBank) : ''} &middot; ${esc(p.nomor)} &middot; a.n. ${esc(p.atasNama)}`;
   };
   const secPengajuan = '<div class="section-title">Pengajuan pinjaman</div>' + (pending.map((l, i) => `
@@ -1057,8 +1070,6 @@ async function vPengaturan() {
       <p class="muted">Ditampilkan ke peminjam saat bayar.</p>
       <label class="form-label"><i class="bi bi-wallet2 me-1"></i>Nomor Dana</label>
       <input id="s-dana" class="form-control" value="${esc(settings.dana)}" placeholder="08xxxxxxxxxx">
-      <label class="form-label"><i class="bi bi-bag-fill me-1"></i>ShopeePay (nomor / ID)</label>
-      <input id="s-shopeepay" class="form-control" value="${esc(settings.shopeepay)}" placeholder="08xxxxxxxxxx">
       <label class="form-label"><i class="bi bi-qr-code me-1"></i>Info QRIS (teks / link gambar)</label>
       <textarea id="s-qris" class="form-control" rows="2" placeholder="cth: QRIS atas nama ...">${esc(settings.qrisNote)}</textarea>
       <button class="btn btn-primary w-100 mt-3" id="s-save"><i class="bi bi-check-lg me-2"></i>Simpan</button>
@@ -1066,7 +1077,7 @@ async function vPengaturan() {
   $('#s-save').addEventListener('click', async () => {
     try {
       await api('/api/settings', 'POST', {
-        dana: $('#s-dana').value, shopeepay: $('#s-shopeepay').value, qrisNote: $('#s-qris').value,
+        dana: $('#s-dana').value, qrisNote: $('#s-qris').value,
       });
       toast('Pengaturan disimpan.');
     } catch (e) { toast(e.message, true); }
@@ -1268,7 +1279,6 @@ async function vAkun() {
       <label class="form-label">Metode</label>
       <select id="pc-metode" class="form-select">
         <option value="dana" ${d.pencairan && d.pencairan.metode === 'dana' ? 'selected' : ''}>Dana</option>
-        <option value="shopeepay" ${d.pencairan && d.pencairan.metode === 'shopeepay' ? 'selected' : ''}>ShopeePay</option>
         <option value="bank" ${d.pencairan && d.pencairan.metode === 'bank' ? 'selected' : ''}>Bank (ATM)</option>
       </select>
       <div id="pc-bank-wrap" class="${d.pencairan && d.pencairan.metode === 'bank' ? '' : 'hidden'}">
@@ -1532,9 +1542,93 @@ async function vBroadcast() {
   });
 }
 
+
+/* ============ PET (v2.9.5) ============ */
+function petPriceClient(level, bought) {
+  return 500 * (2 ** (level - 1)) * (2 ** (bought || 0));
+}
+async function vPet() {
+  let st = await api('/api/pets');
+  const render = () => {
+    const rate = st.productionPerSec || 0;
+    main.innerHTML = `
+    <div${stagger(0, 'card hero-card')}>
+      <h3><i class="bi bi-egg-fill me-2" style="color:var(--gold)"></i>Pet Saya</h3>
+      <div class="kv"><span class="k">Kristal</span><span class="v" style="color:var(--info)">${Number(st.kristal).toLocaleString('id-ID')}</span></div>
+      <div class="kv"><span class="k">Koin</span><span class="v" style="color:var(--gold)">${Number(st.koin).toLocaleString('id-ID')} koin (= ${fmtRp(st.koin)})</span></div>
+      <div class="kv"><span class="k">Produksi</span><span class="v">${rate} kristal/detik</span></div>
+      <div class="kv"><span class="k">Pet</span><span class="v">${st.pets.length} / ${st.maxPets} ekor</span></div>
+      <p class="muted mb-2" style="font-size:12px">Pet menghasilkan kristal terus. Farming offline maks 1 jam, standby tidak ada batas. Klaim berkala saat menu ini dibuka. 10.000 kristal = 1 koin, 1 koin = Rp1 potongan bayar.</p>
+      <div class="d-flex gap-2">
+        <button class="btn btn-primary flex-fill" id="pet-claim"><i class="bi bi-gem me-1"></i>Klaim${st.pendingKristal ? ` (+${Number(st.pendingKristal).toLocaleString('id-ID')} kristal)` : ''}</button>
+        <button class="btn btn-outline-light flex-fill" id="pet-convert"><i class="bi bi-arrow-left-right me-1"></i>Tukar ke Koin</button>
+      </div>
+    </div>
+    <div${stagger(1, 'card')}>
+      <h3><i class="bi bi-bag-plus-fill me-2" style="color:var(--gold)"></i>Beli Pet</h3>
+      <label class="form-label">Level pet</label>
+      <select id="pet-buy-lvl" class="form-select">${Array.from({ length: 10 }, (_, i) => `<option value="${i + 1}">Level ${i + 1}</option>`).join('')}</select>
+      <div id="pet-buy-price" class="muted mt-1" style="font-size:12px"></div>
+      <button class="btn btn-success w-100 mt-2" id="pet-buy"><i class="bi bi-plus-circle-fill me-1"></i>Beli Pet</button>
+      <p class="muted mb-0 mt-2" style="font-size:12px">Harga dasar L1 500, L2 1.000 kristal, dst (x2 tiap level). Tiap sudah beli level yang sama, harga beli berikutnya dikali 2.</p>
+    </div>
+    <div${stagger(2, 'card')}>
+      <h3><i class="bi bi-diagram-2-fill me-2" style="color:var(--gold)"></i>Kandang — ketuk 2 pet level sama untuk merge</h3>
+      ${st.pets.length ? `<div class="pet-grid">${st.pets.map((p) => `
+        <div class="pet-card" data-pet="${p.id}">
+          <div class="pet-lvl">L${p.level}</div>
+          <div><i class="bi bi-egg-fill" style="color:var(--gold)"></i></div>
+          <div class="pet-rate">${p.level === 1 ? '0,5' : (2 ** (p.level - 1))} kristal/detik</div>
+        </div>`).join('')}</div>
+      <button class="btn btn-primary w-100 mt-3" id="pet-merge" disabled><i class="bi bi-diagram-2-fill me-1"></i>Merge 2 Pet</button>`
+        : '<p class="muted mb-0">Belum ada pet.</p>'}
+    </div>`;
+    const updPrice = () => {
+      const lvl = Number($('#pet-buy-lvl').value);
+      const price = petPriceClient(lvl, (st.petBought || {})[lvl] || 0);
+      $('#pet-buy-price').textContent = `Harga: ${price.toLocaleString('id-ID')} kristal (saldo: ${Number(st.kristal).toLocaleString('id-ID')} kristal)`;
+    };
+    updPrice();
+    $('#pet-buy-lvl').addEventListener('change', updPrice);
+    $('#pet-claim').addEventListener('click', async () => {
+      try { st = await api('/api/pets', 'POST', { action: 'claim' }); toast(st.earned ? `Klaim ${Number(st.earned).toLocaleString('id-ID')} kristal.` : 'Belum ada kristal untuk diklaim.'); render(); }
+      catch (e) { toast(e.message, true); }
+    });
+    $('#pet-convert').addEventListener('click', async () => {
+      try { st = await api('/api/pets', 'POST', { action: 'convert' }); toast(st.converted ? `Tukar ${Number(st.converted.kristal).toLocaleString('id-ID')} kristal jadi ${st.converted.koin} koin.` : 'Kristal belum cukup untuk ditukar (butuh 10.000).'); render(); }
+      catch (e) { toast(e.message, true); }
+    });
+    $('#pet-buy').addEventListener('click', async () => {
+      try { st = await api('/api/pets', 'POST', { action: 'buy', level: Number($('#pet-buy-lvl').value) }); toast(`Pet L${st.bought.level} dibeli.`); render(); }
+      catch (e) { toast(e.message, true); }
+    });
+    let sel = [];
+    main.querySelectorAll('.pet-card').forEach((c) => c.addEventListener('click', () => {
+      const id = c.dataset.pet;
+      if (sel.includes(id)) sel = sel.filter((x) => x !== id);
+      else { sel.push(id); if (sel.length > 2) sel.shift(); }
+      main.querySelectorAll('.pet-card').forEach((x) => x.classList.toggle('sel', sel.includes(x.dataset.pet)));
+      const btn = $('#pet-merge');
+      if (btn) btn.disabled = sel.length !== 2;
+    }));
+    const mb = $('#pet-merge');
+    if (mb) mb.addEventListener('click', async () => {
+      try { st = await api('/api/pets', 'POST', { action: 'merge', petIdA: sel[0], petIdB: sel[1] }); toast(`Merge berhasil! Pet baru L${st.merged.level}.`); render(); }
+      catch (e) { toast(e.message, true); }
+    });
+  };
+  render();
+  // Standby farming: klaim berkala tiap 60 detik selama menu Pet dibuka,
+  // supaya produksi standby tidak kena batas offline 1 jam.
+  if (S._petTimer) clearInterval(S._petTimer);
+  S._petTimer = setInterval(async () => {
+    try { st = await api('/api/pets', 'POST', { action: 'claim' }); } catch { /* abaikan */ }
+  }, 60000);
+}
+
 const VIEWS = {
   login: vLogin, register: vRegister,
-  bDash: vBDash, ajukan: vAjukan, bayar: vBayar, langganan: vLangganan, riwayat: vRiwayat, akun: vAkun, notif: vNotif,
+  bDash: vBDash, ajukan: vAjukan, bayar: vBayar, langganan: vLangganan, pet: vPet, riwayat: vRiwayat, akun: vAkun, notif: vNotif,
   aDash: vADash, pengajuan: vPengajuan, klaim: vKlaim, peminjam: vPeminjam, verifikasi: vVerifikasi, broadcast: vBroadcast, audit: vAudit, pengaturan: vPengaturan,
 };
 

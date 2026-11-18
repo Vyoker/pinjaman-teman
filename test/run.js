@@ -340,8 +340,8 @@ function ok(cond, label) {
   const loanD = r.json.loan.id;
   r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId: loanD, approve: true } });
   ok(r.status === 400 && /pencairan/i.test(r.json.error), 'approve terhalang: pencairan kosong');
-  r = await call('../api/profile', { method: 'POST', headers: authD, body: { action: 'pencairan', metode: 'shopeepay', nomor: '081377776666', atasNama: 'Dodi' } });
-  ok(r.json.ok && r.json.pencairan.metode === 'shopeepay', 'Dodi simpan pencairan');
+  r = await call('../api/profile', { method: 'POST', headers: authD, body: { action: 'pencairan', metode: 'dana', nomor: '081377776666', atasNama: 'Dodi' } });
+  ok(r.json.ok && r.json.pencairan.metode === 'dana', 'Dodi simpan pencairan');
   r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId: loanD, approve: true } });
   ok(r.json.ok && r.json.loan.status === 'berjalan', 'approve lolos setelah pencairan terisi');
   // broadcast: validasi
@@ -960,13 +960,129 @@ function ok(cond, label) {
   r = await call('../api/loans', { method: 'POST', headers: auth(tJoko), body: { pokok: 100000 } });
   ok(r.status === 400 && /jeda/i.test(r.json.error), 'paket kedaluwarsa: jeda kembali 72 jam');
 
+
+  // v2.9.5: Pet + kristal/koin, hapus ShopeePay
+  console.log('== Tes v2.9.5 Pet & koin ==');
+  // unit: produksi & harga pet
+  ok(calc.petProductionRate(1) === 0.5, 'pet L1: 0,5 kristal/detik');
+  ok(calc.petProductionRate(2) === 2 && calc.petProductionRate(3) === 4, 'pet L2: 2/detik, L3: 4/detik');
+  ok(calc.petProductionRate(20) === 524288, 'pet L20: 524.288 kristal/detik');
+  ok(calc.petBasePrice(1) === 500 && calc.petBasePrice(2) === 1000 && calc.petBasePrice(3) === 2000, 'harga dasar pet: L1 500, L2 1.000, L3 2.000 kristal');
+  ok(calc.petPrice(1, 0) === 500 && calc.petPrice(1, 1) === 1000 && calc.petPrice(1, 2) === 2000, 'harga beli naik x2 tiap sudah beli level sama');
+  ok(calc.KRISTAL_PER_KOIN === 10000 && calc.KOIN_RP === 1, 'konversi: 10.000 kristal = 1 koin = Rp1');
+  const uPet0 = calc.ensurePetData({});
+  ok(uPet0.kristal === 0 && uPet0.koin === 0 && Array.isArray(uPet0.pets) && uPet0.petFreeClaimed === false, 'ensurePetData: default user lama');
+  assert.throws(() => calc.amountWithMethod(100000, 'shopeepay'), /Metode bayar/, 'ShopeePay ditolak di amountWithMethod');
+  // simulasi tanpa shopeepay
+  r = await call('../api/simulate', { method: 'POST', headers: auth(tJoko), body: { pokok: 100000 } });
+  ok(r.json.ok && r.json.totalBayar.dana && r.json.totalBayar.qris && !('shopeepay' in r.json.totalBayar), 'simulasi: hanya Dana + QRIS, tanpa ShopeePay');
+  // pencairan shopeepay ditolak
+  r = await call('../api/profile', { method: 'POST', headers: auth(tJoko), body: { action: 'pencairan', metode: 'shopeepay', nomor: '081900000015', atasNama: 'Joko' } });
+  ok(r.status === 400, 'pencairan ShopeePay ditolak');
+  // e2e pet: Kiki
+  r = await call('../api/auth', { method: 'POST', body: { action: 'register', name: 'Kiki', phone: '081900000016', password: 'kiki1234' } });
+  ok(r.json.ok, 'registrasi Kiki');
+  r = await call('../api/borrowers', { method: 'POST', headers: auth(tA), body: { phone: '081900000016', approve: true, limit: 500000 } });
+  ok(r.json.ok, 'admin setujui Kiki, limit 500rb');
+  const tKiki = (await call('../api/auth', { method: 'POST', body: { action: 'login', phone: '081900000016', password: 'kiki1234' } })).json.token;
+  const authK = auth(tKiki);
+  r = await call('../api/pets', { method: 'GET', headers: authK });
+  ok(r.json.ok && r.json.pets.length === 1 && r.json.pets[0].level === 1 && r.json.kristal === 0 && r.json.koin === 0, 'pet pertama gratis 1 ekor L1');
+  r = await call('../api/pets', { method: 'GET', headers: auth(tA) });
+  ok(r.status === 403, 'admin ditolak buka Pet (403)');
+  // farming offline 1 jam: L1 0,5/dtk x 3600 = 1.800 kristal
+  let kiki = await getJSON('user:081900000016');
+  kiki.petLastClaimAt = Date.now() - 3600e3;
+  await setJSON('user:081900000016', kiki);
+  r = await call('../api/pets', { method: 'POST', headers: authK, body: { action: 'claim' } });
+  ok(r.json.ok && r.json.earned === 1800 && r.json.kristal === 1800, 'klaim offline 1 jam: 1.800 kristal');
+  // offline 10 jam tetap maks 1 jam
+  kiki = await getJSON('user:081900000016');
+  kiki.petLastClaimAt = Date.now() - 10 * 3600e3;
+  await setJSON('user:081900000016', kiki);
+  r = await call('../api/pets', { method: 'POST', headers: authK, body: { action: 'claim' } });
+  ok(r.json.ok && r.json.earned === 1800 && r.json.kristal === 3600, 'klaim offline 10 jam tetap maks 1.800 kristal');
+  // beli pet: kristal tidak cukup, lalu cukup
+  kiki = await getJSON('user:081900000016');
+  kiki.kristal = 400;
+  await setJSON('user:081900000016', kiki);
+  r = await call('../api/pets', { method: 'POST', headers: authK, body: { action: 'buy', level: 1 } });
+  ok(r.status === 400, 'beli pet kristal tidak cukup ditolak');
+  kiki = await getJSON('user:081900000016');
+  kiki.kristal = 500;
+  await setJSON('user:081900000016', kiki);
+  r = await call('../api/pets', { method: 'POST', headers: authK, body: { action: 'buy', level: 1 } });
+  ok(r.json.ok && r.json.bought.price === 500 && r.json.pets.length === 2 && r.json.kristal === 0, 'beli pet L1 pertama: 500 kristal');
+  kiki = await getJSON('user:081900000016');
+  kiki.kristal = 999;
+  await setJSON('user:081900000016', kiki);
+  r = await call('../api/pets', { method: 'POST', headers: authK, body: { action: 'buy', level: 1 } });
+  ok(r.status === 400, 'beli pet L1 kedua (1.000 kristal) dengan 999 ditolak');
+  kiki = await getJSON('user:081900000016');
+  kiki.kristal = 1000;
+  await setJSON('user:081900000016', kiki);
+  r = await call('../api/pets', { method: 'POST', headers: authK, body: { action: 'buy', level: 1 } });
+  ok(r.json.ok && r.json.bought.price === 1000 && r.json.pets.length === 3, 'beli pet L1 kedua: 1.000 kristal');
+  // merge: level beda ditolak, level sama berhasil
+  const petL1 = r.json.pets.filter((x) => x.level === 1);
+  const [pA, pB] = [petL1[0], petL1[1]];
+  r = await call('../api/pets', { method: 'POST', headers: authK, body: { action: 'merge', petIdA: pA.id, petIdB: 'tidak-ada' } });
+  ok(r.status === 400, 'merge dengan pet tidak ada ditolak');
+  r = await call('../api/pets', { method: 'POST', headers: authK, body: { action: 'merge', petIdA: pA.id, petIdB: pB.id } });
+  ok(r.json.ok && r.json.merged.level === 2 && r.json.pets.length === 2, 'merge 2 pet L1 jadi 1 pet L2');
+  const petL2 = r.json.pets.find((x) => x.level === 2);
+  const petL1sisa = r.json.pets.find((x) => x.level === 1);
+  r = await call('../api/pets', { method: 'POST', headers: authK, body: { action: 'merge', petIdA: petL2.id, petIdB: petL1sisa.id } });
+  ok(r.status === 400, 'merge level beda (L2 + L1) ditolak');
+  // konversi kristal -> koin
+  kiki = await getJSON('user:081900000016');
+  kiki.kristal = 25000;
+  await setJSON('user:081900000016', kiki);
+  r = await call('../api/pets', { method: 'POST', headers: authK, body: { action: 'convert', kristal: 15000 } });
+  ok(r.status === 400, 'tukar bukan kelipatan 10.000 ditolak');
+  r = await call('../api/pets', { method: 'POST', headers: authK, body: { action: 'convert' } });
+  ok(r.json.ok && r.json.converted.koin === 2 && r.json.kristal === 5000 && r.json.koin === 2, 'tukar 20.000 kristal jadi 2 koin, sisa 5.000 kristal');
+  // koin dipakai mengurangi pembayaran
+  r = await call('../api/profile', { method: 'POST', headers: authK, body: { action: 'pencairan', metode: 'dana', nomor: '081900000016', atasNama: 'Kiki' } });
+  assert.ok(r.json.ok, 'Kiki isi data pencairan');
+  r = await call('../api/simulate', { method: 'POST', headers: authK, body: { pokok: 100000 } });
+  const totalKiki = r.json.total;
+  r = await call('../api/loans', { method: 'POST', headers: authK, body: { pokok: 100000 } });
+  const loanKiki = r.json.loan.id;
+  r = await call('../api/loan-action', { method: 'POST', headers: auth(tA), body: { action: 'decide', loanId: loanKiki, approve: true } });
+  ok(r.json.ok, 'pinjaman Kiki disetujui');
+  r = await call('../api/payments', { method: 'POST', headers: authK, body: { action: 'claim', loanId: loanKiki, schedIdx: 0, payMethod: 'shopeepay', proof: PROOF } });
+  ok(r.status === 400, 'klaim bayar via ShopeePay ditolak');
+  kiki = await getJSON('user:081900000016');
+  kiki.koin = 5000;
+  await setJSON('user:081900000016', kiki);
+  r = await call('../api/payments', { method: 'POST', headers: authK, body: { action: 'claim', loanId: loanKiki, schedIdx: 0, payMethod: 'dana', proof: PROOF, koinUsed: 5000 } });
+  ok(r.json.ok && r.json.claim.amount === totalKiki - 5000 && r.json.claim.koinUsed === 5000, 'klaim pakai 5.000 koin: tagihan berkurang Rp5.000');
+  const claimKiki = r.json.claim.id;
+  ok((await getJSON('user:081900000016')).koin === 0, 'koin terpotong saat klaim');
+  r = await call('../api/payments', { method: 'POST', headers: auth(tA), body: { action: 'confirm', claimId: claimKiki, approve: false } });
+  ok(r.json.ok, 'klaim Kiki ditolak admin');
+  ok((await getJSON('user:081900000016')).koin === 5000, 'koin dikembalikan saat klaim ditolak');
+  r = await call('../api/payments', { method: 'POST', headers: authK, body: { action: 'claim', loanId: loanKiki, schedIdx: 0, payMethod: 'dana', proof: PROOF, koinUsed: 5000 } });
+  const claimKiki2 = r.json.claim.id;
+  r = await call('../api/payments', { method: 'POST', headers: auth(tA), body: { action: 'confirm', claimId: claimKiki2, approve: true } });
+  ok(r.json.ok && r.json.loan.status === 'lunas', 'klaim dengan koin disetujui: pinjaman lunas');
+  ok((await getJSON('user:081900000016')).koin === 0, 'koin tetap terpotong setelah klaim disetujui');
+  r = await call('../api/me', { method: 'GET', headers: authK });
+  ok(r.json.kristal === 5000 && r.json.koin === 0 && r.json.petCount === 2, '/api/me: kristal/koin/pet tampil');
+  // UI v2.9.5
+  const appJs295 = require('fs').readFileSync(require('path').join(__dirname, '../public/app.js'), 'utf8');
+  const css295 = require('fs').readFileSync(require('path').join(__dirname, '../public/styles.css'), 'utf8');
+  ok(appJs295.includes('vPet') && appJs295.includes("'/api/pets'") && appJs295.includes('koinUsed'), 'UI: menu Pet + pemakaian koin di lapor bayar');
+  ok(!appJs295.includes('shopeepay') && !css295.includes('shopeepay'), 'UI: tidak ada lagi ShopeePay');
+
   // v2.9.4: UI — background kotak, langganan compact, slider info
   const fs = require('fs');
   const path = require('path');
   const appJs = fs.readFileSync(path.join(__dirname, '../public/app.js'), 'utf8');
   const css = fs.readFileSync(path.join(__dirname, '../public/styles.css'), 'utf8');
   const idxHtml = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
-  ok(css.includes('floatSq') && css.includes('repeating-linear-gradient(90deg'), 'background: kotak hijau + animasi halus');
+  ok(css.includes('dropSq') && css.includes('pulseSq') && css.includes('repeating-linear-gradient(90deg'), 'background gaming: grid neon + kotak jatuh + denyut');
   ok((idxHtml.match(/class="sq"/g) || []).length >= 4, 'background: kotak melayang di index.html');
   ok(appJs.includes('subPayPlan') && appJs.includes('data-subhead') && appJs.includes('sub-back'), 'langganan: accordion + tombol ke tampilan QRIS');
   ok(appJs.includes('infoSlider') && appJs.includes('INFO_SLIDES') && appJs.includes('10000'), 'dashboard: slider 3 info, 10 detik');

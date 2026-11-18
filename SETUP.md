@@ -44,7 +44,7 @@ Tanpa langkah ini aplikasi jalan tapi data hanya di memori
 ## 4. Isi info pembayaran (sebagai admin)
 
 1. Buka URL Vercel → login pakai `ADMIN_PHONE` + `ADMIN_PASSWORD`.
-2. Menu **Pengaturan** → isi nomor Dana, ShopeePay, info QRIS → Simpan.
+2. Menu **Pengaturan** → isi nomor Dana, info QRIS → Simpan.
 
 ## 5. Alur pakai
 
@@ -52,7 +52,7 @@ Tanpa langkah ini aplikasi jalan tapi data hanya di memori
 2. Kamu (menu **Peminjam**) setujui + atur limit per teman.
 3. Teman **Ajukan** pinjaman (lihat simulasi dulu) → kamu setujui di
    menu **Pengajuan** (tenor final 15–30 hari, jadwal dibuat otomatis).
-4. Teman transfer manual via Dana/ShopeePay/QRIS → **Bayar** → pilih metode
+4. Teman transfer manual via Dana/QRIS → **Bayar** → pilih metode
    → **Lapor Sudah Bayar**.
 5. Kamu cek menu **Pembayaran** → **Terima** (pastikan uang masuk dulu).
 6. Pantau di **Dashboard**: outstanding, jatuh tempo 7 hari, yang telat.

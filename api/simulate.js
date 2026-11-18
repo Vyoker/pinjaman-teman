@@ -24,7 +24,6 @@ module.exports = requireAuth(async (req, res) => {
 
     const withPay = (amount) => ({
       dana: amountWithMethod(amount, 'dana'),
-      shopeepay: amountWithMethod(amount, 'shopeepay'),
       qris: amountWithMethod(amount, 'qris'),
     });
 

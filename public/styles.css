@@ -30,30 +30,40 @@ body {
   min-height: 100vh;
 }
 
-/* Latar dekoratif — kotak-kotak ala AfiStore, hijau, animasi halus (v2.9.4) */
+/* Latar dekoratif — grid kotak ala gaming (v2.9.5): grid neon tegas,
+   kotak jatuh + berdenyut dengan glow, tetap CSS saja tanpa gambar. */
 #bg-fx {
   position: fixed; inset: 0; z-index: -1; pointer-events: none; overflow: hidden;
   background:
-    repeating-linear-gradient(0deg, transparent 0 47px, rgba(34,176,125,.055) 47px 48px),
-    repeating-linear-gradient(90deg, transparent 0 47px, rgba(34,176,125,.055) 47px 48px),
-    radial-gradient(600px 300px at 85% -5%, rgba(34,176,125,.16), transparent 60%),
-    radial-gradient(500px 280px at 10% 10%, rgba(34,176,125,.08), transparent 60%),
-    radial-gradient(700px 500px at 50% 110%, rgba(14,122,85,.14), transparent 60%);
+    repeating-linear-gradient(0deg, transparent 0 39px, rgba(34,176,125,.14) 39px 40px),
+    repeating-linear-gradient(90deg, transparent 0 39px, rgba(34,176,125,.14) 39px 40px),
+    repeating-linear-gradient(0deg, transparent 0 199px, rgba(232,194,106,.10) 199px 200px),
+    repeating-linear-gradient(90deg, transparent 0 199px, rgba(232,194,106,.10) 199px 200px),
+    radial-gradient(600px 300px at 85% -5%, rgba(34,176,125,.20), transparent 60%),
+    radial-gradient(500px 280px at 10% 10%, rgba(14,122,85,.18), transparent 60%),
+    radial-gradient(700px 500px at 50% 110%, rgba(232,194,106,.08), transparent 60%);
 }
 #bg-fx .sq {
-  position: absolute; border: 1px solid rgba(34,176,125,.28);
-  background: rgba(34,176,125,.06); border-radius: 4px;
-  animation: floatSq 14s ease-in-out infinite alternate;
+  position: absolute; border: 2px solid rgba(34,176,125,.55);
+  background: rgba(34,176,125,.10); border-radius: 4px;
+  box-shadow: 0 0 12px rgba(34,176,125,.35), inset 0 0 12px rgba(34,176,125,.18);
+  animation: dropSq 9s linear infinite, pulseSq 2.4s ease-in-out infinite alternate;
 }
-#bg-fx .sq:nth-child(1) { width: 56px; height: 56px; top: 12%; left: 6%; animation-duration: 16s; }
-#bg-fx .sq:nth-child(2) { width: 34px; height: 34px; top: 22%; right: 8%; animation-duration: 12s; animation-delay: -4s; }
-#bg-fx .sq:nth-child(3) { width: 72px; height: 72px; top: 58%; left: 2%; animation-duration: 19s; animation-delay: -7s; }
-#bg-fx .sq:nth-child(4) { width: 44px; height: 44px; top: 68%; right: 12%; animation-duration: 14s; animation-delay: -2s; }
-#bg-fx .sq:nth-child(5) { width: 26px; height: 26px; top: 42%; left: 12%; animation-duration: 11s; animation-delay: -6s; }
-#bg-fx .sq:nth-child(6) { width: 60px; height: 60px; top: 84%; left: 46%; animation-duration: 17s; animation-delay: -9s; }
-@keyframes floatSq {
-  from { transform: translateY(0) rotate(0deg); opacity: .55; }
-  to { transform: translateY(-22px) rotate(8deg); opacity: 1; }
+#bg-fx .sq:nth-child(1) { width: 56px; height: 56px; left: 6%; animation-duration: 11s, 2.2s; }
+#bg-fx .sq:nth-child(2) { width: 34px; height: 34px; left: 22%; animation-duration: 8s, 1.8s; animation-delay: -3s, -.6s; border-color: rgba(232,194,106,.55); box-shadow: 0 0 12px rgba(232,194,106,.35), inset 0 0 12px rgba(232,194,106,.18); }
+#bg-fx .sq:nth-child(3) { width: 72px; height: 72px; left: 38%; animation-duration: 13s, 2.8s; animation-delay: -6s, -1s; }
+#bg-fx .sq:nth-child(4) { width: 44px; height: 44px; left: 58%; animation-duration: 9s, 2s; animation-delay: -2s, -.3s; border-color: rgba(232,194,106,.55); box-shadow: 0 0 12px rgba(232,194,106,.35), inset 0 0 12px rgba(232,194,106,.18); }
+#bg-fx .sq:nth-child(5) { width: 26px; height: 26px; left: 74%; animation-duration: 7s, 1.6s; animation-delay: -5s, -.9s; }
+#bg-fx .sq:nth-child(6) { width: 60px; height: 60px; left: 88%; animation-duration: 12s, 2.5s; animation-delay: -8s, -.5s; }
+@keyframes dropSq {
+  from { top: -90px; transform: rotate(0deg); opacity: 0; }
+  8% { opacity: .9; }
+  92% { opacity: .9; }
+  to { top: 105%; transform: rotate(200deg); opacity: 0; }
+}
+@keyframes pulseSq {
+  from { box-shadow: 0 0 8px rgba(34,176,125,.25), inset 0 0 8px rgba(34,176,125,.12); }
+  to { box-shadow: 0 0 18px rgba(34,176,125,.55), inset 0 0 16px rgba(34,176,125,.25); }
 }
 @media (prefers-reduced-motion: reduce) {
   #bg-fx .sq { animation: none; }
@@ -396,3 +406,10 @@ details.sim summary { cursor: pointer; font-weight: 700; font-size: 14px; color:
   box-shadow: 0 8px 24px rgba(0,0,0,.35);
 }
 
+
+/* ============ PET (v2.9.5) ============ */
+.pet-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.pet-card { border: 2px solid var(--line); border-radius: var(--radius); padding: 12px; background: var(--card2); text-align: center; }
+.pet-card.sel { border-color: var(--gold); box-shadow: 0 0 0 2px rgba(232,194,106,.35); }
+.pet-lvl { font-size: 28px; font-weight: 800; color: var(--gold); }
+.pet-rate { font-size: 12px; color: var(--muted); }
