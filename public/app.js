@@ -300,9 +300,9 @@ function dueBanner(active) {
 }
 
 /** v2.9.4: slider info dashboard — 3 slide, fade kanan ke kiri, 10 detik.
- * Gambar: /info-1.jpg, /info-2.jpg, /info-3.jpg di folder public.
+ * Gambar: /info-1.webp, /info-2.webp, /info-3.webp di folder public (WebP, ringan).
  * Kalau gambar belum ada, tampil placeholder "Gambar menyusul". */
-const INFO_SLIDES = ['/info-1.jpg', '/info-2.jpg', '/info-3.jpg'];
+const INFO_SLIDES = ['/info-1.webp', '/info-2.webp', '/info-3.webp'];
 function infoSliderHtml() {
   return `
   <div class="info-slider" id="infoSlider">

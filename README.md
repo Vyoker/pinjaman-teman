@@ -21,9 +21,10 @@ dari tagihan yang lewat jatuh tempo.
   QRIS paket yang dipilih, lengkap dengan tombol "Pilih paket lain".
 - **Slider info di dashboard:** 3 slide untuk informasi terbaru, animasi fade
   dari kanan ke kiri, pindah otomatis tiap 10 detik, bisa diketuk titiknya
-  untuk pindah manual. Gambar diambil dari `public/info-1.jpg`,
-  `public/info-2.jpg`, `public/info-3.jpg` — kalau gambar belum ada, tampil
-  placeholder "Gambar menyusul".
+  untuk pindah manual. Gambar diambil dari `public/info-1.webp`,
+  `public/info-2.webp`, `public/info-3.webp` (WebP, 1464x340 px) — kalau gambar belum ada, tampil
+  placeholder "Gambar menyusul". Info 1 (Langganan Lite/PRO) dan info 2 (Gunakan Sesuai
+  Keperluan) sudah ada; info 3 masih placeholder.
 - Langganan tetap ada: Lite Rp10.000/bulan (+Rp5.000 limit per pelunasan,
   jeda 48 jam), PRO Rp25.000/bulan (+Rp10.000, jeda 24 jam), bayar manual via
   QRIS lalu admin aktifkan dari menu Peminjam (30 hari).
