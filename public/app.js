@@ -1,7 +1,7 @@
 'use strict';
 /* Pinjaman Teman — SPA frontend (Bootstrap 5 + animasi) */
 
-const APP_VERSION = '2.9.5';
+const APP_VERSION = '2.9.6';
 const $ = (s) => document.querySelector(s);
 /** Pasang handler ke semua elemen yang cocok (pengganti pola querySelectorAll berulang). */
 const bindAll = (sel, ev, fn) => document.querySelectorAll(sel).forEach((el) => el.addEventListener(ev, fn));
@@ -375,7 +375,7 @@ async function vBDash() {
         : `<div class="muted" style="font-size:12px">Mau limit lebih besar? <a href="#" id="b-lengkapi" style="color:var(--gold)">Lengkapi data diri</a></div>`}
       ${(me.subBonus || 0) > 0 ? `<div class="muted" style="font-size:12px">termasuk bonus langganan ${fmtRp(me.subBonus)}</div>` : ''}
       <div class="kv mt-2"><span class="k"><i class="bi bi-gem me-1"></i>Kristal / Koin</span><span class="v">${Number(me.kristal || 0).toLocaleString('id-ID')} kristal &middot; ${Number(me.koin || 0).toLocaleString('id-ID')} koin</span></div>
-      <div class="muted" style="font-size:12px">Pet menghasilkan kristal, 10.000 kristal = 1 koin = Rp1 potongan bayar. <a href="#" id="b-pet" style="color:var(--gold)">Buka menu Pet</a></div>
+      <div class="muted" style="font-size:12px">${me.subPlan ? 'Pet menghasilkan kristal, 10.000 kristal = 1 koin = Rp1 potongan bayar.' : '<i class="bi bi-lock-fill me-1"></i>Pet terkunci untuk Free — berlangganan Lite/PRO untuk membuka.'} <a href="#" id="b-pet" style="color:var(--gold)">Buka menu Pet</a></div>
       ${active ? '' : (me.restricted
         ? '<button class="btn btn-locked w-100 mt-3" disabled><i class="bi bi-lock-fill me-2"></i>Ajukan Pinjaman</button><p class="note warn"><i class="bi bi-lock-fill me-1"></i>Akunmu dibatasi admin. Kamu tidak bisa mengajukan pinjaman baru.</p>'
         : '<button class="btn btn-primary w-100 mt-3" id="b-ajukan"><i class="bi bi-plus-circle-fill me-2"></i>Ajukan Pinjaman</button>')}
@@ -532,6 +532,8 @@ function renderSub(me) {
       <div class="anim-in mt-2">
         <div class="kv"><span class="k">Bonus limit per pelunasan</span><span class="v">+${fmtRp(p.bonus)}</span></div>
         <div class="kv"><span class="k">Jeda pengajuan baru</span><span class="v">${p.cooldownHours} jam</span></div>
+        <div class="kv"><span class="k">Akses Pet</span><span class="v" style="color:var(--gold)">Terbuka</span></div>
+        <p class="muted mb-2" style="font-size:12px">Minigame Pet terbuka: pet menghasilkan kristal, 10.000 kristal = 1 koin = Rp1 potongan bayar. Pet pertama gratis 1 ekor L1.</p>
         <p class="muted mb-2" style="font-size:12px">Bonus limit masuk ke limit kamu setiap kali pinjaman lunas penuh selama langganan aktif. Jeda dihitung dari pelunasan terakhir.</p>
         <button class="btn btn-primary w-100" data-subpay="${key}">${aktif ? 'Perpanjang ' : 'Langganan '}${p.name}</button>
       </div>` : ''}
@@ -543,8 +545,11 @@ function renderSub(me) {
       ${plan
         ? `<div class="kv"><span class="k">Paket kamu</span><span class="v" style="color:var(--gold)">${esc(me.subPlanName)}</span></div>
       <div class="kv"><span class="k">Berlaku sampai</span><span class="v">${fmtDate(me.subExpiresAt)}</span></div>
-      <div class="kv"><span class="k">Bonus langganan terkumpul</span><span class="v">+${fmtRp(me.subBonus || 0)}</span></div>`
-        : `<p class="muted mb-0">Kamu belum berlangganan. Tanpa langganan, jeda pengajuan baru 72 jam setelah pelunasan dan tidak ada bonus limit.</p>`}
+      <div class="kv"><span class="k">Bonus langganan terkumpul</span><span class="v">+${fmtRp(me.subBonus || 0)}</span></div>
+      <div class="kv"><span class="k">Akses Pet</span><span class="v" style="color:var(--gold)">Terbuka</span></div>
+      <p class="muted mb-0" style="font-size:12px">Selama langganan aktif, kamu bisa main Pet di menu Pet: pet menghasilkan kristal, 10.000 kristal = 1 koin = Rp1 potongan bayar.</p>`
+        : `<p class="muted mb-0">Kamu belum berlangganan. Tanpa langganan, jeda pengajuan baru 72 jam setelah pelunasan dan tidak ada bonus limit.</p>
+      <p class="muted mb-0 mt-2" style="font-size:12px"><i class="bi bi-lock-fill me-1"></i>Minigame Pet terkunci untuk peminjam Free. Berlangganan Lite atau PRO untuk membuka akses Pet: pet menghasilkan kristal, 10.000 kristal = 1 koin = Rp1 potongan bayar.</p>`}
     </div>
     ${card('lite', 1)}
     ${card('pro', 2)}`;
@@ -1548,7 +1553,27 @@ function petPriceClient(level, bought) {
   return 500 * (2 ** (level - 1)) * (2 ** (bought || 0));
 }
 async function vPet() {
-  let st = await api('/api/pets');
+  const me = await api('/api/me');
+  // v2.9.6: Pet hanya untuk Lite/PRO aktif; Free dikunci.
+  if (!me.subPlan) {
+    main.innerHTML = `
+    <div${stagger(0, 'card hero-card')} style="border-color:var(--gold)">
+      <h3><i class="bi bi-lock-fill me-2" style="color:var(--gold)"></i>Pet Terkunci</h3>
+      <p class="mb-2">Minigame Pet hanya bisa digunakan oleh pelanggan <strong>Lite</strong> dan <strong>PRO</strong>.</p>
+      <p class="muted mb-2" style="font-size:12px">Dengan langganan, kamu mendapat pet pertama gratis 1 ekor L1. Pet menghasilkan kristal, 10.000 kristal = 1 koin = Rp1 potongan bayar. Koin yang sudah kamu miliki tetap bisa dipakai untuk bayar, walau Pet terkunci.</p>
+      <button class="btn btn-primary w-100" id="pet-lock-sub"><i class="bi bi-gem me-1"></i>Lihat Langganan</button>
+    </div>`;
+    $('#pet-lock-sub').addEventListener('click', () => go('langganan'));
+    return;
+  }
+  let st;
+  try {
+    st = await api('/api/pets');
+  } catch (e) {
+    main.innerHTML = `<div${stagger(0, 'card')}><p class="mb-2"><i class="bi bi-lock-fill me-2"></i>${esc(e.message)}</p><button class="btn btn-primary w-100" id="pet-lock-sub2"><i class="bi bi-gem me-1"></i>Lihat Langganan</button></div>`;
+    $('#pet-lock-sub2').addEventListener('click', () => go('langganan'));
+    return;
+  }
   const render = () => {
     const rate = st.productionPerSec || 0;
     main.innerHTML = `

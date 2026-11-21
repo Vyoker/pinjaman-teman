@@ -1,5 +1,8 @@
 'use strict';
 // /api/pets (v2.9.5) — minigame Pet merge + 2 mata uang.
+// v2.9.6: akses Pet HANYA untuk pelanggan Lite/PRO yang aktif.
+//   Peminjam Free (tanpa langganan / langganan kedaluwarsa) -> 403.
+//   Koin yang sudah dimiliki tetap bisa dipakai bayar (tidak dikunci).
 //   GET  -> status pet, kristal, koin, produksi/detik (peminjam)
 //   POST { action:'claim' } -> klaim produksi pet (offline maks 1 jam)
 //   POST { action:'buy', level } -> beli pet pakai kristal
@@ -12,7 +15,7 @@ const { requireAuth, readBody, send } = require('../lib/auth');
 const {
   ensurePetData, petProductionRate, petBasePrice, petPrice,
   petProductionPerSec, KRISTAL_PER_KOIN, PET_MAX_LEVEL, PET_MAX_COUNT,
-  PET_OFFLINE_MS,
+  PET_OFFLINE_MS, activeSubPlan,
 } = require('../lib/calc');
 const { audit } = require('../lib/audit');
 
@@ -77,6 +80,12 @@ module.exports = requireAuth(async (req, res) => {
   }
   const nowMs = Date.now();
   try {
+    // v2.9.6: Pet hanya untuk Lite/PRO aktif — dicek sebelum pet gratis diberikan.
+    const rawUser = await getJSON('user:' + req.session.phone);
+    if (!rawUser) return send(res, 404, { ok: false, error: 'Akun tidak ditemukan.' });
+    if (!activeSubPlan(rawUser, nowMs)) {
+      return send(res, 403, { ok: false, error: 'Fitur Pet hanya untuk pelanggan Lite/PRO. Berlangganan dulu di menu Langganan untuk membuka akses Pet.' });
+    }
     if (req.method === 'GET') {
       const user = await loadUser(req.session.phone, nowMs);
       if (!user) return send(res, 404, { ok: false, error: 'Akun tidak ditemukan.' });

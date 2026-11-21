@@ -986,6 +986,9 @@ function ok(cond, label) {
   ok(r.json.ok, 'admin setujui Kiki, limit 500rb');
   const tKiki = (await call('../api/auth', { method: 'POST', body: { action: 'login', phone: '081900000016', password: 'kiki1234' } })).json.token;
   const authK = auth(tKiki);
+  // v2.9.6: Kiki harus berlangganan dulu sebelum bisa buka Pet
+  r = await call('../api/borrowers', { method: 'POST', headers: auth(tA), body: { action: 'set-sub', phone: '081900000016', plan: 'lite' } });
+  ok(r.json.ok && r.json.plan === 'lite', 'admin aktifkan Lite Kiki (syarat buka Pet v2.9.6)');
   r = await call('../api/pets', { method: 'GET', headers: authK });
   ok(r.json.ok && r.json.pets.length === 1 && r.json.pets[0].level === 1 && r.json.kristal === 0 && r.json.koin === 0, 'pet pertama gratis 1 ekor L1');
   r = await call('../api/pets', { method: 'GET', headers: auth(tA) });
@@ -1076,6 +1079,42 @@ function ok(cond, label) {
   ok(appJs295.includes('vPet') && appJs295.includes("'/api/pets'") && appJs295.includes('koinUsed'), 'UI: menu Pet + pemakaian koin di lapor bayar');
   ok(!appJs295.includes('shopeepay') && !css295.includes('shopeepay'), 'UI: tidak ada lagi ShopeePay');
   ok(require('fs').readdirSync(require('path').join(__dirname, '../api')).filter((f) => f.endsWith('.js')).length <= 12, 'Vercel Hobby: maks 12 Serverless Function');
+
+
+  // v2.9.6: Pet hanya untuk Lite/PRO, Free dikunci
+  console.log('== Tes v2.9.6 Pet terkunci ==');
+  r = await call('../api/auth', { method: 'POST', body: { action: 'register', name: 'Lina', phone: '081900000017', password: 'lina1234' } });
+  ok(r.json.ok, 'registrasi Lina (Free)');
+  r = await call('../api/borrowers', { method: 'POST', headers: auth(tA), body: { phone: '081900000017', approve: true, limit: 500000 } });
+  ok(r.json.ok, 'admin setujui Lina, limit 500rb');
+  const tLina = (await call('../api/auth', { method: 'POST', body: { action: 'login', phone: '081900000017', password: 'lina1234' } })).json.token;
+  const authL = auth(tLina);
+  r = await call('../api/me', { method: 'GET', headers: authL });
+  ok(r.json.subPlan === null, '/api/me Lina: tanpa langganan');
+  r = await call('../api/pets', { method: 'GET', headers: authL });
+  ok(r.status === 403 && /Lite\/PRO/.test(r.json.error), 'Free: buka Pet ditolak 403');
+  r = await call('../api/pets', { method: 'POST', headers: authL, body: { action: 'claim' } });
+  ok(r.status === 403, 'Free: klaim Pet ditolak 403');
+  ok((await getJSON('user:081900000017')).petFreeClaimed !== true, 'Free: pet gratis tidak diberikan');
+  // berlangganan Lite -> Pet terbuka
+  r = await call('../api/borrowers', { method: 'POST', headers: auth(tA), body: { action: 'set-sub', phone: '081900000017', plan: 'lite' } });
+  ok(r.json.ok && r.json.plan === 'lite', 'admin aktifkan Lite Lina');
+  r = await call('../api/pets', { method: 'GET', headers: authL });
+  ok(r.json.ok && r.json.pets.length === 1 && r.json.pets[0].level === 1, 'Lite: buka Pet berhasil, pet gratis L1 didapat');
+  // langganan kedaluwarsa -> Pet terkunci lagi
+  const linaUser = await getJSON('user:081900000017');
+  linaUser.subExpiresAt = new Date(Date.now() - 1000).toISOString();
+  await setJSON('user:081900000017', linaUser);
+  r = await call('../api/pets', { method: 'GET', headers: authL });
+  ok(r.status === 403, 'langganan kedaluwarsa: Pet terkunci lagi');
+  // PRO juga bisa
+  r = await call('../api/borrowers', { method: 'POST', headers: auth(tA), body: { action: 'set-sub', phone: '081900000017', plan: 'pro' } });
+  ok(r.json.ok && r.json.plan === 'pro', 'admin aktifkan PRO Lina');
+  r = await call('../api/pets', { method: 'GET', headers: authL });
+  ok(r.json.ok && r.json.pets.length === 1, 'PRO: buka Pet berhasil, pet lama tetap ada');
+  // UI v2.9.6
+  ok(appJs295.includes('Pet Terkunci') && appJs295.includes('Lihat Langganan'), 'UI: menu Pet terkunci untuk Free');
+  ok(appJs295.includes('Akses Pet'), 'UI: keterangan Pet di menu Langganan');
 
   // v2.9.4: UI — background kotak, langganan compact, slider info
   const fs = require('fs');

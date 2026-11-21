@@ -10,6 +10,18 @@ Biaya layanan Rp 2.000 per pinjaman, biaya pencairan Rp 2.500 per pinjaman.
 Bayar via Dana atau QRIS (QRIS +1% MDR). Denda telat 1% per hari
 dari tagihan yang lewat jatuh tempo.
 
+## Yang baru di v2.9.6
+
+- **Pet hanya untuk Lite/PRO:** minigame Pet kini hanya bisa dibuka oleh
+  pelanggan Lite atau PRO yang masih aktif. Peminjam Free melihat halaman
+  "Pet Terkunci" dengan tombol ke menu Langganan. Kalau langganan habis,
+  Pet terkunci lagi — pet dan kristalnya tetap tersimpan dan kembali
+  terbuka saat berlangganan lagi. Koin yang sudah dimiliki tetap bisa
+  dipakai untuk mengurangi pembayaran, walau Pet terkunci.
+- **Keterangan Pet di menu Langganan:** tiap paket (Lite/PRO) kini
+  menampilkan "Akses Pet: Terbuka" beserta penjelasannya (pet menghasilkan
+  kristal, 10.000 kristal = 1 koin = Rp1 potongan bayar).
+
 ## Yang baru di v2.9.5
 
 - **ShopeePay dihapus:** bayar hanya via Dana atau QRIS (QRIS +1% MDR),
